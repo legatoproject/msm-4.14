@@ -315,6 +315,7 @@ struct qseecom_control {
 	bool no_clock_support;
 	unsigned int ce_opp_freq_hz;
 	bool appsbl_qseecom_support;
+	bool is_cmnlib_not_loaded_by_appsbl;
 	uint32_t qsee_reentrancy_support;
 	bool enable_key_wrap_in_ks;
 
@@ -9151,6 +9152,12 @@ static int qseecom_probe(struct platform_device *pdev)
 		pr_debug("qseecom.appsbl_qseecom_support = 0x%x",
 				qseecom.appsbl_qseecom_support);
 
+		qseecom.is_cmnlib_not_loaded_by_appsbl =
+				of_property_read_bool((&pdev->dev)->of_node,
+						"qcom,appsbl-not-loaded-cmnlib");
+		pr_debug("qseecom.is_cmnlib_not_loaded_by_appsbl = 0x%x",
+				qseecom.is_cmnlib_not_loaded_by_appsbl);
+
 		qseecom.commonlib64_loaded =
 				of_property_read_bool((&pdev->dev)->of_node,
 						"qcom,commonlib64-loaded-by-uefi");
@@ -9294,6 +9301,9 @@ static int qseecom_probe(struct platform_device *pdev)
 		if (qseecom.is_apps_region_protected ||
 					qseecom.appsbl_qseecom_support)
 			qseecom.commonlib_loaded = true;
+
+		if (qseecom.is_cmnlib_not_loaded_by_appsbl)
+			qseecom.commonlib_loaded = false;
 	} else {
 		qseecom_platform_support = (struct msm_bus_scale_pdata *)
 						pdev->dev.platform_data;
