@@ -18,6 +18,7 @@
 #include <linux/kmod.h>
 #include <linux/reboot.h>
 #include <linux/timekeeping.h>
+#include <linux/alarmtimer.h>
 #include <linux/gpio.h>
 
 #include <linux/mfd/swimcu/core.h>
@@ -49,6 +50,12 @@
 *  (expect max 10% deviation for the MCU LPO 1K clock).
 */
 #define SWIMCU_CALIBRATE_TRUNCATE_FACTOR     50
+
+/* The MCU timer timeout value is trimmed off by this percentage
+*  to migigate possible deviation for the MCU LPO 1K clock over
+*  temerature (expect max 1.5%).
+*/
+#define SWIMCU_CALIBRATE_TEMPERATURE_FACTOR  2       /* percent */
 
 /* Constants for MCU watchdog feature */
 #define SWIMCU_WATCHDOG_TIMEOUT_INVALID      0
@@ -207,7 +214,6 @@ static u32 swimcu_watchdog_reset_delay = SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT;
 static u32 swimcu_watchdog_renew_count = 0;
 
 /* MCU psm support configuration */
-static u32 swimcu_psm_time = 0;
 static int swimcu_psm_enable = 0;
 static enum mci_protocol_pm_psm_sync_option_e
                 swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
@@ -216,6 +222,47 @@ static enum mci_protocol_pm_psm_sync_option_e
 static int swimcu_lpo_calibrate_enable   = SWIMCU_DISABLE;
 static u32 swimcu_lpo_calibrate_mcu_time = SWIMCU_CALIBRATE_TIME_DEFAULT;
 static struct timespec swimcu_calibrate_start_tv;
+
+/************
+*
+* Name:     swimcu_mdm_sec_to_mcu_time_ms
+*
+* Purpose:  Convert mdm time (in seconds) to equivalent MCU time in millisecond
+*
+* Parms:    swimcup  - pointer to the swimcu data object
+*           mdm_time - MDM time interval to be converted
+*
+* Return:   equivalent mcu_time in milliseconds
+*
+* Abort:    none
+*
+************/
+static u32 swimcu_mdm_sec_to_mcu_time_ms(
+	struct swimcu *swimcup,
+	u32 mdm_time)
+{
+	u32 mcu_time, remainder;
+
+	pr_info("%s: mdm time=%u seconds to be calibrated %d/%d\n", __func__,
+		mdm_time, swimcup->calibrate_mcu_time, swimcup->calibrate_mdm_time);
+
+	mutex_lock(&swimcup->calibrate_mutex);
+	mdm_time *= swimcup->calibrate_mcu_time;
+	mcu_time = mdm_time / swimcup->calibrate_mdm_time; /* seconds */
+
+	/* keep millisecond precision on MCU side */
+	remainder = mdm_time % swimcup->calibrate_mdm_time;
+	remainder *= MSEC_PER_SEC;                          /* milliseconds */
+	remainder = mdm_time / swimcup->calibrate_mdm_time; /* milliseconds*/
+
+	mutex_unlock(&swimcup->calibrate_mutex);
+
+	mcu_time *= MSEC_PER_SEC;                           /* milliseconds */
+
+	pr_info("%s: mcu time %u ms + remainder time %u ms = %u ms\n",
+		__func__, mcu_time, remainder, mcu_time + remainder);
+	return (mcu_time + remainder);
+}
 
 /************
 *
@@ -546,6 +593,54 @@ int pm_reboot_call(
 
 /************
 *
+* Name:     swimcu_pm_psm_time_get
+*
+* Purpose:  To get PSM time from PMIC RTC
+*
+* Parms:    none
+*
+* Return:   Remaining PSM time interval (in seconds)
+*
+* Abort:    none
+*
+************/
+static u32 swimcu_pm_psm_time_get(void)
+{
+	unsigned long rtc_secs, alarm_secs;
+	u32 interval;
+	struct rtc_wkalrm rtc_alarm;
+	struct rtc_time   rtc_time;
+	struct rtc_device *rtc = alarmtimer_get_rtcdev();
+
+	if (!rtc)
+	{
+		pr_err("%s: faile to get RTC device", __func__);
+		return 0;
+	}
+
+	/* retrieve configured RTC time and RTC Alarm settings; convert to seconds */
+	rtc_read_alarm(rtc, &rtc_alarm);
+	rtc_tm_to_time(&rtc_alarm.time, &alarm_secs);
+
+	rtc_read_time(rtc, &rtc_time);
+	rtc_tm_to_time(&rtc_time, &rtc_secs);
+
+	if (alarm_secs > rtc_secs)
+	{
+		interval = alarm_secs - rtc_secs;
+		pr_info("%s: alarm %lu rtc %lu interval %u", __func__, alarm_secs, rtc_secs, interval);
+	}
+	else
+	{
+		interval = 0;
+		pr_err("%s: invalid configuration alarm %lu rtc %lu", __func__, alarm_secs, rtc_secs);
+	}
+
+	return interval;
+}
+
+/************
+*
 * Name:     pm_set_mcu_ulpm_enable
 *
 * Purpose:  Configure MCU with triggers and enter ultra low power mode
@@ -573,7 +668,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	enum swimcu_adc_index adc_wu_src = SWIMCU_ADC_INVALID;
 	enum swimcu_adc_compare_mode adc_compare_mode;
 	int adc_bitmask;
-	uint32_t time_ms;
+	uint32_t timeout;
 	bool watchdog_disabled = false;
 
 	if ((pm < SWIMCU_PM_OFF) || (pm > SWIMCU_PM_MAX))
@@ -643,23 +738,13 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 			/* wakeup time has been validated upon user input (in seconds)
 			*  which garantees no overflow in the following calculation.
 			*/
-			mutex_lock(&swimcu->calibrate_mutex);
-			wu_config.args.timeout = swimcu_wakeup_time * swimcu->calibrate_mcu_time;
-
-			/* Process the remainder for milliseond precision */
-			time_ms = wu_config.args.timeout % swimcu->calibrate_mdm_time;
-			time_ms *= MSEC_PER_SEC;
-			time_ms /= swimcu->calibrate_mdm_time;
-
-			wu_config.args.timeout /= swimcu->calibrate_mdm_time;
-			mutex_unlock(&swimcu->calibrate_mutex);
-
-			wu_config.args.timeout *= MSEC_PER_SEC;
-			wu_config.args.timeout += time_ms;
+			wu_config.args.timeout =
+				swimcu_mdm_sec_to_mcu_time_ms(swimcu, swimcu_wakeup_time);
 
 			if( MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
 				(rc = swimcu_wakeup_source_config(swimcu, &wu_config,
-				MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET)) ) {
+				MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET)) )
+			{
 				pr_err("%s: timer wu fail %d\n", __func__, rc);
 				ret = -EIO;
 				goto wu_fail;
@@ -707,12 +792,12 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 
 	if (swimcu_watchdog_enable == SWIMCU_ENABLE)
 	{
-		rc = mci_appl_timer_stop(swimcu, &timer_state, &time_ms);
+		rc = mci_appl_timer_stop(swimcu, &timer_state, &timeout);
 		if (rc == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
 			swimcu_watchdog_enable = SWIMCU_DISABLE;
 			watchdog_disabled = true;
 			swimcu_log(PM, "%s: timer stopped in state %d with remaining time %d\n",
-				__func__, timer_state, time_ms);
+				__func__, timer_state, timeout);
 		}
 		else
 		{
@@ -722,29 +807,60 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 
 	if ((wu_source != 0) || (pm == SWIMCU_PM_POWER_SWITCH) || (pm == SWIMCU_PM_PSM_SYNC)) {
 
-		if (pm == SWIMCU_PM_PSM_SYNC) {
+		if (pm == SWIMCU_PM_PSM_SYNC)
+		{
+			pr_info("%s: user-selected psm sync option %d\n", __func__, swimcu_psm_sync_select);
 
-			/* make sure there is a minimal support for PSM sync */
-			if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE) {
-				swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A;
+			if (swimcu_psm_sync_select != MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A)
+			{
+				/* attempt to read remaining PSM time if sync option A is not specified */
+				timeout = swimcu_pm_psm_time_get();
+				pr_info("%s: configured psm time %d\n", __func__, timeout);
+				if (timeout > 0)
+				{
+					/* set sync option B with non-zero PSM time */
+					if (swimcu_psm_sync_select != MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B)
+					{
+						swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B;
+					}
+
+					/* mitigate the risk of LPO clock variation over temperature */
+					timeout *= (100 - SWIMCU_CALIBRATE_TEMPERATURE_FACTOR);
+					timeout /= 100;
+					pr_err("%s: at floor of tempreture variation %d\n", __func__, timeout);
+
+					timeout = swimcu_mdm_sec_to_mcu_time_ms(swimcu, timeout);
+					pr_info("%s: device calibration %d\n", __func__, timeout);
+				}
+				else
+				{
+					/* fall back to sync option A with invalid zero PSM time*/
+					pr_err("%s: cannot get PSM time--fall back to option A\n", __func__);
+					swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A;
+				}
+			}
+			else 
+			{
+				timeout = 0;
 			}
 
-			pr_info("%s: sending psm_sync_config", __func__);
+			pr_info("%s: sending psm_sync_config sync option %d max_wait %u psm time %u\n",
+				__func__, swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
 			rc = swimcu_psm_sync_config(swimcu,
-				swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, swimcu_psm_time);
-
-		} else {
-
+				swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
+		}
+		else
+		{
 			pr_info("%s: sending wait_time_config", __func__);
 			rc = swimcu_pm_wait_time_config(swimcu, SWIMCU_PM_WAIT_SYNC_TIME, 0);
 		}
 
-		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == rc) {
-
+		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == rc)
+		{
 			swimcu_pm_state = PM_STATE_SYNC;
-
-		} else if (MCI_PROTOCOL_STATUS_CODE_UNKNOWN_COMMAND == rc) {
-
+		}
+		else if (MCI_PROTOCOL_STATUS_CODE_UNKNOWN_COMMAND == rc)
+		{
 			pr_info("%s: pm wait_time_config not recognized by MCU, \
 				proceed with legacy shutdown\n", __func__);
 			swimcu_pm_state = PM_STATE_SHUTDOWN;
