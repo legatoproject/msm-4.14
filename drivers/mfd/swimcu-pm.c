@@ -214,7 +214,7 @@ static u32 swimcu_watchdog_reset_delay = SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT;
 static u32 swimcu_watchdog_renew_count = 0;
 
 /* MCU psm support configuration */
-static int swimcu_psm_enable = 0;
+static u32 swimcu_psm_active_time = 0;
 static enum mci_protocol_pm_psm_sync_option_e
                 swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
 
@@ -682,6 +682,11 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		return 0;
 	}
 
+	if (pm == SWIMCU_PM_PSM_REQUEST || pm == SWIMCU_PM_PSM_IN_PROGRESS) {
+		swimcu_log(PM, "%s: PSM request in progress\n",__func__);
+		return 0;
+	}
+
 	if (SWIMCU_ENABLE == swimcu_lpo_calibrate_enable)
 	{
 		pr_err("%s: MCU LPO calibration in process\n", __func__);
@@ -1033,6 +1038,7 @@ static ssize_t enable_store(struct kobject *kobj,
 		ret = pm_set_mcu_ulpm_enable(swimcu, tmp_enable);
 		if (0 == ret) {
 			swimcu_pm_enable = tmp_enable;
+			sysfs_notify(&swimcu->pm_psm_kobj, NULL, "enable");
 			ret = count;
 		}
 	}
@@ -1580,7 +1586,7 @@ static ssize_t swimcu_psm_sync_select_attr_store(struct kobject *kobj,
 static ssize_t swimcu_psm_enable_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%d\n", swimcu_psm_enable);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", swimcu_pm_enable);
 }
 
 static ssize_t swimcu_psm_enable_attr_store(struct kobject *kobj,
@@ -1590,12 +1596,13 @@ static ssize_t swimcu_psm_enable_attr_store(struct kobject *kobj,
 	struct swimcu *swimcup;
 
 	ret = kstrtouint(buf, 0, &tmp_enable);
-	if ((0 == ret) && (tmp_enable == SWIMCU_PSM_ENTER))
+	if (0 == ret)
 	{
 		swimcup = container_of(kobj, struct swimcu, pm_psm_kobj);
-		ret = pm_set_mcu_ulpm_enable(swimcup, SWIMCU_PM_PSM_SYNC);
+		ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
 		if (0 == ret) {
-			swimcu_psm_enable = tmp_enable;
+			swimcu_pm_enable = tmp_enable;
+			sysfs_notify(kobj, NULL, "enable");
 			ret = count;
 		} else {
 			ret = -EINVAL;
@@ -1607,6 +1614,51 @@ static ssize_t swimcu_psm_enable_attr_store(struct kobject *kobj,
 	return ret;
 }
 
+static ssize_t swimcu_psm_active_time_attr_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%u\n", swimcu_psm_active_time);
+}
+
+static ssize_t swimcu_psm_active_time_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int tmp_active_time, ret;
+
+	ret = kstrtouint(buf, 0, &tmp_active_time);
+	if (!ret)
+	{
+		swimcu_psm_active_time = tmp_active_time;
+		ret = count;
+	} else {
+		ret = -EINVAL;
+		pr_err("%s: invalid input %s\n", __func__, buf);
+	}
+	return ret;
+}
+
+static ssize_t swimcu_psm_time_attr_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%u\n", swimcu_wakeup_time);
+}
+
+static ssize_t swimcu_psm_time_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int tmp_psm_time, ret;
+
+	ret = kstrtouint(buf, 0, &tmp_psm_time);
+	if (!ret)
+	{
+		swimcu_wakeup_time = tmp_psm_time;
+		ret = count;
+	} else {
+		ret = -EINVAL;
+		pr_err("%s: invalid input %s\n", __func__, buf);
+	}
+	return ret;
+}
 /* sysfs entry to read PSM synchronization support options */
 static const struct kobj_attribute swimcu_psm_sync_support_attr = {
 	.attr = {
@@ -1634,6 +1686,26 @@ static const struct kobj_attribute swimcu_psm_enable_attr = {
 	},
 	.show = &swimcu_psm_enable_attr_show,
 	.store = &swimcu_psm_enable_attr_store,
+};
+
+/* sysfs entry to set PSM/ULPM active time */
+static const struct kobj_attribute swimcu_psm_active_time_attr = {
+	.attr = {
+		.name = "active_time",
+		.mode = S_IRUGO | S_IWUSR | S_IWGRP
+	},
+	.show = &swimcu_psm_active_time_attr_show,
+	.store = &swimcu_psm_active_time_attr_store,
+};
+
+/* sysfs entry to set PSM/ULPM PSM time */
+static const struct kobj_attribute swimcu_psm_time_attr = {
+	.attr = {
+		.name = "psm_time",
+		.mode = S_IRUGO | S_IWUSR | S_IWGRP
+	},
+	.show = &swimcu_psm_time_attr_show,
+	.store = &swimcu_psm_time_attr_store,
 };
 
 /************
@@ -2055,6 +2127,20 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_enable_attr.attr);
 		if (ret) {
 			pr_err("%s: cannot create PSM sync enable node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_active_time_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create PSM active_time node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_time_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create PSM psm_time node\n", __func__);
 			ret = -ENOMEM;
 			goto sysfs_add_exit;
 		}

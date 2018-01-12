@@ -27,16 +27,14 @@
 #define SWIMCU_APPL_I2C_FREQ    100
 #define SWIMCU_APPL_I2C_ID      1
 
-#define SWIMCU_PM_OFF           0
-#define SWIMCU_PM_BOOT_SOURCE   1
-#define SWIMCU_PM_POWER_SWITCH  2
-#define SWIMCU_PM_PSM_SYNC      3
-#define SWIMCU_PM_MAX           SWIMCU_PM_PSM_SYNC
+#define SWIMCU_PM_OFF             0
+#define SWIMCU_PM_BOOT_SOURCE     1
+#define SWIMCU_PM_POWER_SWITCH    2
+#define SWIMCU_PM_PSM_SYNC        3  /* To enter PSM state */
+#define SWIMCU_PM_PSM_IN_PROGRESS 4  /* PSM request in progress */
+#define SWIMCU_PM_PSM_REQUEST     5  /* To request PSM */
 
-#define SWIMCU_PSM_IDLE         0  /* No PSM is requested */
-#define SWIMCU_PSM_REQUEST      1  /* To request PSM */
-#define SWIMCU_PSM_ACCEPT       2  /* To accept PSM request */
-#define SWIMCU_PSM_ENTER        3  /* To enter PSM state */
+#define SWIMCU_PM_MAX           SWIMCU_PM_PSM_REQUEST
 
 #define SWIMCU_ADC_VREF         1800
 #define SWIMCU_ADC_INTERVAL_MAX 65535
