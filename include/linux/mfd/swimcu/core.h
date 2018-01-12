@@ -90,6 +90,7 @@ enum swimcu_adc_compare_mode
 #define SWIMCU_DRIVER_INIT_WATCHDOG  (1 << 7)
 #define SWIMCU_DRIVER_INIT_PSM       (1 << 8)
 #define SWIMCU_DRIVER_INIT_CALIBRATE (1 << 9)
+#define SWIMCU_DRIVER_INIT_PANIC     (1 << 10)
 
 #define SWIMCU_DEBUG
 
@@ -171,6 +172,7 @@ struct swimcu {
 
 	struct notifier_block nb;
 	struct notifier_block reboot_nb;
+	struct notifier_block panic_nb;
 
 	struct kobject pm_boot_source_kobj;
 	struct kobject pm_firmware_kobj;

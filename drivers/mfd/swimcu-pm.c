@@ -538,7 +538,7 @@ static int pm_ulpm_config(struct swimcu* swimcu, u16 wu_source)
 * Purpose:  Handler for reboot notifier
 *
 * Parms:    this - notifier block associated with this handler
-*           code - reboot code. We are only interested in SYS_POWER_OFF
+*           code - reboot code. We are only interested in SYS_POWER_OFF/SYS_RESTART
 *           cmd  - not used.
 *
 * Return:   0 always
@@ -550,6 +550,8 @@ int pm_reboot_call(
 	struct notifier_block *this, unsigned long code, void *cmd)
 {
 	int rc;
+	uint32_t time_ms;
+	enum mci_protocol_hw_timer_state_e timer_state;
 	struct swimcu* swimcu = container_of(this, struct swimcu, reboot_nb);
 
 	if (SYS_POWER_OFF == code)
@@ -588,8 +590,70 @@ int pm_reboot_call(
 			break;
 		}
 	}
+	else if (SYS_RESTART == code)
+	{
+		if (swimcu_watchdog_enable == SWIMCU_ENABLE)
+		{
+			rc = mci_appl_timer_stop(swimcu, &timer_state, &time_ms);
+
+			if (rc == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
+				swimcu_watchdog_enable = SWIMCU_DISABLE;
+				swimcu_log(PM, "%s: Watchdog timer stopped in state %d with remaining time %d\n",
+				__func__, timer_state, time_ms);
+			}
+			else
+			{
+				pr_err("%s: cannot stop MCU Watchdog: %d\n", __func__, rc);
+			}
+		}
+	}
+
 	return NOTIFY_DONE;
 }
+
+
+/************
+*
+* Name:     pm_panic_call
+*
+* Purpose:  Handler for panic notifier
+*
+* Parms:    this  - notifier block associated with this handler
+*           event - not used
+*           ptr   - not used
+*
+* Return:   0 always
+*
+* Abort:    none
+*
+************/
+int pm_panic_call(
+	struct notifier_block *this, unsigned long event, void *ptr)
+{
+	int rc;
+	uint32_t time_ms;
+	enum mci_protocol_hw_timer_state_e timer_state;
+	struct swimcu* swimcu = container_of(this, struct swimcu, panic_nb);
+
+	if (swimcu_watchdog_enable == SWIMCU_ENABLE)
+	{
+		rc = mci_appl_timer_stop(swimcu, &timer_state, &time_ms);
+
+		if (rc == MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			swimcu_watchdog_enable = SWIMCU_DISABLE;
+			swimcu_log(PM, "%s: Watchdog timer stopped in state %d with remaining time %d\n",
+				__func__, timer_state, time_ms);
+		}
+		else
+		{
+			pr_err("%s: cannot stop MCU Watchdog: %d\n", __func__, rc);
+		}
+	}
+
+	return NOTIFY_DONE;
+}
+
 
 /************
 *

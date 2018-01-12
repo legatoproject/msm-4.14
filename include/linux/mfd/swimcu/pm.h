@@ -41,4 +41,6 @@ void wake_n_set_callback(void (*event_cb)(void));
 
 int pm_reboot_call(struct notifier_block *this, unsigned long code, void* cmd);
 
+int pm_panic_call(struct notifier_block *this, unsigned long event, void* ptr);
+
 #endif

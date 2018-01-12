@@ -758,6 +758,18 @@ int swimcu_device_init(struct swimcu *swimcu)
 		swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_REBOOT;
 	}
 
+	if(!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_PANIC)) {
+		swimcu->panic_nb.notifier_call = pm_panic_call;
+		ret = atomic_notifier_chain_register(&panic_notifier_list, &(swimcu->panic_nb));
+
+		if (ret) {
+			pr_err("%s: Failed to register panic notifier\n", __func__);
+			goto exit;
+		}
+
+		swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_PANIC;
+	}
+
 	if(pdata->func_flags & SWIMCU_FUNC_FLAG_EVENT) {
 		ret = swimcu_process_events(swimcu);
 		if (ret != 0) {
