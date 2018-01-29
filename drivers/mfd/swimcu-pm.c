@@ -710,7 +710,10 @@ static u32 swimcu_pm_psm_time_get(void)
 * Purpose:  Configure MCU with triggers and enter ultra low power mode
 *
 * Parms:    swimcu - device driver data
-*           pm - 0 (do nothing) or 1 (initiate power down)
+*           pm - 0 , 1, 4, 5: do nothing
+*              - 2: enter ULPM, power switch wakeup only
+*              - 3: enter PSM
+*              - 6: enter ULPM with user-configured wakeup sources
 *
 * Return:   0 if successful
 *           -ERRNO otherwise
@@ -746,7 +749,9 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		return 0;
 	}
 
-	if (pm == SWIMCU_PM_PSM_REQUEST || pm == SWIMCU_PM_PSM_IN_PROGRESS) {
+	if (pm == SWIMCU_PM_PSM_REQUEST ||
+	    pm == SWIMCU_PM_PSM_IN_PROGRESS ||
+	    pm == SWIMCU_PM_BOOT_SOURCE) {
 		swimcu_log(PM, "%s: PSM request in progress\n",__func__);
 		return 0;
 	}
@@ -757,7 +762,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		return -EIO;
 	}
 
-	if ((pm == SWIMCU_PM_BOOT_SOURCE) || (pm == SWIMCU_PM_PSM_SYNC)) {
+	if ((pm == SWIMCU_PM_PSM_SYNC) || (pm == SWIMCU_PM_ULPM_FALLBACK)) {
 		/* setup GPIO and ADC wakeup sources */
 		for( wi = 0; wi < ARRAY_SIZE(wusrc_param); wi++ ) {
 			if( wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS ) {
