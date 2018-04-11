@@ -118,7 +118,51 @@ static uint32_t swimcu_pm_data[SWIMCU_PM_DATA_MAX_SIZE] =
 	SWIMCU_WUSRC_ADC_THRES_DEFAULT,    /* SWIMCU_PM_DATA_WUSRC_ADC3_CONFIG  */
 };
 
-#define ADC_ATTR_SHOW(name)                                             \
+/* Macros for constructing a SYSFS node of integer type
+*  node   -- name of a tree node.
+*  dft    -- default value of the node.
+*  min    -- low limit (inclusive) of valid node value.
+*  max    -- high limit (inclusive) of valid node value.
+*  str    -- name of the SYSFS node to be shown.
+*  notify -- whether to notify user of the value change (true/false).
+*/
+#define SWIMCU_PM_INT_ATTR_SHOW(node)                                \
+	static ssize_t swimcu_pm_##node##_attr_show(struct kobject *kobj,   \
+		struct kobj_attribute *attr, char *buf)                     \
+	{                                                                   \
+		return scnprintf(buf, PAGE_SIZE, "%i\n", swimcu_pm_##node); \
+	}
+
+#define SWIMCU_PM_INT_ATTR_STORE(node, min, max, str, notify)            \
+	static ssize_t swimcu_pm_##node##_attr_store(struct kobject *kobj,                 \
+	struct kobj_attribute *attr, const char *buf, size_t count)                        \
+	{                                                                                  \
+		int value;                                                                 \
+		int ret = kstrtoint(buf, 0, &value);                                       \
+		if (!ret && value >= min && value <= max) {                                \
+			if (swimcu_pm_##node != value) {                                   \
+				swimcu_pm_##node = value;                                  \
+				if (notify) sysfs_notify(kobj, NULL, str);                 \
+			}                                                                  \
+			ret = count;                                                       \
+		} else {                                                                   \
+			ret = -EINVAL;                                                     \
+			pr_err("%s: invalid input %s (%i~%i)\n", __func__, buf, min, max); \
+		}                                                                          \
+		return ret;                                                                \
+	}
+
+#define SWIMCU_PM_INT_ATTR(node, dft, min, max, str, notify)    \
+	static int swimcu_pm_##node = dft;                                  \
+	SWIMCU_PM_INT_ATTR_SHOW(node)                                       \
+	SWIMCU_PM_INT_ATTR_STORE(node, min, max, str, notify)               \
+	static const struct kobj_attribute swimcu_##node##_attr = {         \
+		.attr = {.name = str, .mode = S_IRUGO | S_IWUSR | S_IWGRP}, \
+		.show = &swimcu_pm_##node##_attr_show,                      \
+		.store = &swimcu_pm_##node##_attr_store,                    \
+	};
+
+#define ADC_ATTR_SHOW(name)                                       	\
 	static ssize_t pm_adc_##name##_attr_show(struct kobject *kobj,  \
 		struct kobj_attribute *attr, char *buf)                 \
 	{                                                               \
@@ -1159,7 +1203,7 @@ void swimcu_pm_data_store(struct swimcu *swimcup)
 * Abort:    none
 *
 ************/
-void swimcu_pm_rtc_restore(struct swimcu *swimcup)
+static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 {
 	enum mci_protocol_status_code_e s_code;
 	enum mci_protocol_pm_psm_sync_option_e sync_opt;
@@ -2581,6 +2625,7 @@ static ssize_t swimcu_psm_time_attr_store(struct kobject *kobj,
 	}
 	return ret;
 }
+
 /* sysfs entry to read PSM synchronization support options */
 static const struct kobj_attribute swimcu_psm_sync_support_attr = {
 	.attr = {
@@ -2629,6 +2674,8 @@ static const struct kobj_attribute swimcu_psm_time_attr = {
 	.show = &swimcu_psm_time_attr_show,
 	.store = &swimcu_psm_time_attr_store,
 };
+
+SWIMCU_PM_INT_ATTR(psm_status, 0, -11, 13, "status", true)
 
 /************
 *
@@ -3073,6 +3120,13 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_time_attr.attr);
 		if (ret) {
 			pr_err("%s: cannot create PSM psm_time node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_status_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create PSM status node (ret=%d)\n", __func__, ret);
 			ret = -ENOMEM;
 			goto sysfs_add_exit;
 		}
