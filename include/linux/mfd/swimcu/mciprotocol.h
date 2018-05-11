@@ -794,6 +794,7 @@ enum mci_protocol_wakeup_source_type_e
   MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS  = 0x0001,  /* External pins interrupt */
   MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER     = 0x0002,  /* RTC alarm timeout event */
   MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC       = 0x0004,  /* ADC result from an analog input pin */
+  MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ALL       = 0x0007,  /* All wakeup source types */
 };
 
 /* Max 16 pins for each port */

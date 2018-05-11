@@ -2011,6 +2011,69 @@ static ssize_t enable_store(struct kobject *kobj,
 	return ret;
 };
 
+static ssize_t clear_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int ret, wi;
+	struct swimcu_wusrc_config_state_s state = {0};
+	struct swimcu *swimcup = container_of(kobj, struct swimcu, pm_boot_source_kobj);
+
+	ret = kstrtoint(buf, 0, &state.wusrc_mask);
+	if (0 == ret)
+	{
+		/* validate user input set bit masks */
+		if ((state.wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ALL) &&
+			(state.wusrc_mask & ~MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ALL) == 0)
+		{
+			/* For wakeup sources of other types (TIMTER and ADC), clear local config
+			*  only because they are activated only on the entrance to PSM/ULPM.
+			*  For wakeup sources of GPIO type, clear local config and disable GPIO
+			*  interrupts on MCU, where may have been enabled when configured.
+			*/
+			if (state.wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER)
+			{
+				/* clear local configuration  */
+				swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT] = 0;
+			}
+
+			if (state.wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC)
+			{
+				/* clear local configuration  */
+				swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL] = SWIMCU_WUSRC_ADC_INTERVAL_DEFAULT;
+				swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC2_CONFIG] = SWIMCU_WUSRC_ADC_THRES_DEFAULT;
+				swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC3_CONFIG] = SWIMCU_WUSRC_ADC_THRES_DEFAULT;
+			}
+
+			if (state.wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS)
+			{
+				/* disable remote configuration on MCU */
+				for (wi = WUSRC_MIN; wi < WUSRC_NUM_GPIO; wi++)
+				{
+					if (MCI_PIN_IRQ_DISABLED != swimcu_pm_wusrc_gpio_irq_get(wusrc_param[wi].id))
+					{
+						state.gpio_pin_mask |= wusrc_param[wi].mask;
+						state.recovery_irqs[wi] = MCI_PIN_IRQ_DISABLED;
+					}
+				}
+				swimcu_pm_wusrc_config_reset(swimcup, &state);
+
+				/* clear local configuration */
+				swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_GPIO_IRQS] = 0x0;
+			}
+
+			ret = count;
+		}
+		else
+		{
+			ret = -ERANGE;
+		}
+	}
+
+	if (ret < 0)
+		pr_err("%s: invalid input %s ret %d\n", __func__, buf, ret);
+	return ret;
+};
+
 static ssize_t update_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
@@ -2761,6 +2824,9 @@ static const struct kobj_attribute pm_timer_timeout_attr[] = {
 /* sysfs entries to set boot_source enable */
 static const struct kobj_attribute swimcu_pm_enable_attr = __ATTR_WO(enable);
 
+/* sysfs entries to clear wakeup source of selected types */
+static const struct kobj_attribute swimcu_pm_wusrc_clear_attr = __ATTR_WO(clear);
+
 /* sysfs entries to initiate firmware upgrade */
 static const struct kobj_attribute fw_update_attr = __ATTR_WO(update);
 
@@ -2947,6 +3013,14 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 			ret = -ENOMEM;
 			goto sysfs_add_exit;
 		}
+
+		ret = sysfs_create_file(&swimcu->pm_boot_source_kobj, &swimcu_pm_wusrc_clear_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create clear\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
 		kobject_uevent(&swimcu->pm_boot_source_kobj, KOBJ_ADD);
 	}
 
