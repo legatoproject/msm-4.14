@@ -57,6 +57,11 @@
 */
 #define SWIMCU_CALIBRATE_TEMPERATURE_FACTOR  2       /* percent */
 
+/* Values for TOD update status variable */
+#define SWIMCU_CALIBRATE_TOD_UPDATE_AVAIL    0
+#define SWIMCU_CALIBRATE_TOD_UPDATE_OK       1
+#define SWIMCU_CALIBRATE_TOD_UPDATE_FAILED   -1
+
 /* Constants for MCU watchdog feature */
 #define SWIMCU_WATCHDOG_TIMEOUT_INVALID      0
 #define SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT  1         /* second */
@@ -69,7 +74,7 @@
 #define SWIMCU_PM_DATA_CALIBRATE_MDM_TIME      0
 #define SWIMCU_PM_DATA_CALIBRATE_MCU_TIME      1
 #define SWIMCU_PM_DATA_EXPECTED_ULPM_TIME      2
-#define SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME       3
+#define SWIMCU_PM_DATA_PRE_ULPM_TOD            3
 #define SWIMCU_PM_DATA_4_RESERVED              4
 
 /* Group 1: User wakeup source configuration */
@@ -104,7 +109,7 @@ static uint32_t swimcu_pm_data[SWIMCU_PM_DATA_MAX_SIZE] =
 	SWIMCU_PM_DATA_CALIBRATE_DEFAULT,  /* SWIMCU_PM_DATA_CALIBRATE_MDM_TIME */
 	SWIMCU_PM_DATA_CALIBRATE_DEFAULT,  /* SWIMCU_PM_DATA_CALIBRATE_MCU_TIME */
 	0,                                 /* SWIMCU_PM_DATA_EXPECTED_ULPM_TIME */
-	0,                                 /* SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME  */
+	0,                                 /* SWIMCU_PM_DATA_PRE_ULPM_TOD       */
 	0,                                 /* SWIMCU_PM_DATA_4_RESERVED         */
 
 	/* group 1 */
@@ -329,6 +334,9 @@ static enum mci_protocol_pm_psm_sync_option_e
 static int swimcu_lpo_calibrate_enable   = SWIMCU_DISABLE;
 static u32 swimcu_lpo_calibrate_mcu_time = SWIMCU_CALIBRATE_TIME_DEFAULT;
 static struct timespec swimcu_calibrate_start_tv;
+
+/* status of post-ULPM TOD update */
+static int swimcu_pm_tod_update_status = SWIMCU_CALIBRATE_TOD_UPDATE_FAILED;
 
 /*****************************
 * Wakeup sourc configuration *
@@ -693,7 +701,7 @@ static u32 swimcu_mdm_sec_to_mcu_time_ms(
 	swimcu_calibrate_data_get(swimcup,
 		SWIMCU_CALIBRATE_MDM2MCU, mdm_time, &cal_mdm_time, &cal_mcu_time);
 
-	pr_info("%s: mdm time=%u seconds to be calibrated %d/%d\n",
+	pr_info("%s: mdm time=%u seconds to be calibrated %u/%u\n",
 		__func__, mdm_time, cal_mcu_time, cal_mdm_time);
 
 	mdm_time *= cal_mcu_time;
@@ -1216,11 +1224,11 @@ void swimcu_pm_data_store(struct swimcu *swimcup)
 		swimcup->calibrate_mcu_time;
 	mutex_unlock(&swimcup->calibrate_mutex);
 
-	/* Save pre-ULPM RTC clock */
+	/* Save pre-ULPM time of the day */
 	tv.tv_sec = 0;
 	do_gettimeofday(&tv);
 	tv.tv_sec += (tv.tv_usec + USEC_PER_SEC/2)/USEC_PER_SEC;
-	swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME] = tv.tv_sec;
+	swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_TOD] = tv.tv_sec;
 
 	for (i = 0; i < MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS; i++)
 	{
@@ -1238,9 +1246,9 @@ void swimcu_pm_data_store(struct swimcu *swimcup)
 
 /************
 *
-* Name:     swimcu_pm_rtc_restore
+* Name:     swimcu_pm_lpo_calibrate_start
 *
-* Purpose:  To restore PMIC RTC time
+* Purpose:  To start MCU LPO clock calibration
 *
 * Parms:    swimcup - pointer to device driver data
 *
@@ -1249,36 +1257,56 @@ void swimcu_pm_data_store(struct swimcu *swimcup)
 * Abort:    none
 *
 ************/
-static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
+static void swimcu_pm_lpo_calibrate_start(struct swimcu *swimcup)
+{
+	int ret;
+
+	/* Start the MCU LPO calibration with the previous calibration duration or
+	*  default duration, whichever is longer.
+	*/
+	swimcup->calibrate_mcu_time =
+		max(swimcup->calibrate_mcu_time, (u32)SWIMCU_CALIBRATE_TIME_DEFAULT);
+	ret = swimcu_lpo_calibrate_do_enable(swimcup, SWIMCU_ENABLE);
+	if (ret)
+	{
+		pr_err("%s: Failed to start MCU timer calibration %d\n", __func__, ret);
+	}
+	else
+	{
+		swimcu_log(INIT, "%s: MCU LPO calibration started %u\n",
+			__func__, swimcu_lpo_calibrate_mcu_time);
+	}
+}
+
+/************
+*
+* Name:     swimcu_pm_tod_update
+*
+* Purpose:  To update time of the day in Linux system
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   none
+*
+* Abort:    none
+*
+************/
+static void swimcu_pm_tod_update(struct swimcu *swimcup)
 {
 	enum mci_protocol_status_code_e s_code;
 	enum mci_protocol_pm_psm_sync_option_e sync_opt;
 	u32 ulpm_time_sec, ulpm_time_ms, remainder, cal_mdm_time, cal_mcu_time;
 	struct timespec tv;
-	int ret;
+	int ret = SWIMCU_CALIBRATE_TOD_UPDATE_FAILED;
+	uint8_t count;
 
-	if (swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME] == 0)
-	{
-		swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME] = SWIMCU_PM_DATA_CALIBRATE_DEFAULT;
-		swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME] = SWIMCU_PM_DATA_CALIBRATE_DEFAULT;
-	}
-	else
-	{
-		/* restore the calibration data */
-		mutex_lock(&swimcup->calibrate_mutex);
-		swimcu_lpo_calibrate_mcu_time =
-			swimcup->calibrate_mcu_time =
-				swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME];
-		swimcup->calibrate_mdm_time =
-			swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME];
-		mutex_unlock(&swimcup->calibrate_mutex);
-	}
+	swimcu_pm_tod_update_status = SWIMCU_CALIBRATE_TOD_UPDATE_FAILED;
 
 	s_code = swimcu_appl_psm_duration_get(swimcup, &ulpm_time_ms, &sync_opt);
 	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code)
 	{
 		pr_err("%s: failed to get ULPM duration: %d\n", __func__, s_code);
-		return;
+		goto TOD_UPDATE_EXIT;
 	}
 
 	/* restore sync select configuration */
@@ -1286,15 +1314,16 @@ static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 	if ((sync_opt == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A) ||
 		(sync_opt == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B))
 	{
-		swimcu_log(INIT, "%s: no RTC recovery is required for sync option %d\n", __func__, sync_opt);
-		return;
+		swimcu_log(INIT, "%s: no TOD recovery is required for sync option %d\n", __func__, sync_opt);
+		goto TOD_UPDATE_EXIT;
 	}
 
-	pr_info("%s: MCUFW elapsed PSM tme: %dms\n", __func__, ulpm_time_ms);
+	swimcu_log(INIT, "%s: MCUFW elapsed PSM tme: %dms\n", __func__, ulpm_time_ms);
+
 	if (ulpm_time_ms == 0)
 	{
 		pr_err("%s: nil PSM elapsed time\n", __func__);
-		return;
+		goto TOD_UPDATE_EXIT;
 	}
 
 	/* Split elapsed ULPM time into seconds and milliseconds to avoid overflow */
@@ -1310,28 +1339,51 @@ static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 	ulpm_time_sec = ulpm_time_sec / cal_mcu_time;
 
 	/* Convert "milliseconds" portion, plus remainder from the "seconds" portion */
-	ulpm_time_ms = (ulpm_time_ms * cal_mdm_time) + remainder * MSEC_PER_SEC;
+	ulpm_time_ms = ulpm_time_ms * cal_mdm_time + remainder * MSEC_PER_SEC;
 	ulpm_time_ms = ulpm_time_ms / cal_mcu_time;
 
-	pr_info("%s ULPM duration in MDM time scale: %u s %u ms\n",
-		__func__, ulpm_time_sec, ulpm_time_ms);
+	swimcu_log(INIT, "%s: MDM time %u sec %u ms (%u/%u)\n",
+		__func__, ulpm_time_sec, ulpm_time_ms, cal_mdm_time, cal_mcu_time);
 
-	/* Final post-ULPM system time */
-	tv.tv_sec = swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME] + ulpm_time_sec;
+	if (ulpm_time_ms >= MSEC_PER_SEC)
+	{
+		ulpm_time_sec += 1;
+		ulpm_time_ms -= MSEC_PER_SEC;
+	}
+
+	/* Final post-ULPM time of the day */
+	tv.tv_sec  = ulpm_time_sec + swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_TOD];
 	tv.tv_nsec = ulpm_time_ms * NSEC_PER_MSEC;
-	pr_info("%s  pre-PSM sys_time: %u sec\n",
-		__func__, swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME]);
-	pr_info("%s post-PSM sys_time: %ld sec\n", __func__, tv.tv_sec);
 
 	ret = do_settimeofday(&tv);
 	if (ret == 0)
 	{
-		pr_info("%s set post-ULPM RTC\n", __func__);
+		swimcu_pm_tod_update_status = SWIMCU_CALIBRATE_TOD_UPDATE_OK;
+
+		swimcu_log(INIT, "%s  pre-ULPM tod: %u sec\n",
+			__func__, swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_TOD]);
+		swimcu_log(INIT, "%s set post-ULPM tod: %ld sec\n", __func__, tv.tv_sec);
 	}
 	else
 	{
 		pr_err("%s failed to set post-ULPM RTC ret=%d\n", __func__, ret);
 	}
+
+TOD_UPDATE_EXIT:
+
+	/* Reset the pre ULPM TOD value stored on MCU (in Group 0 clock/time info)
+	*  to prevent any possible erroneous TOD update due to non-ULPM resets.
+	*/
+	swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_TOD] = 0;
+	count = MCI_PROTOCOL_DATA_GROUP_SIZE;
+	s_code = swimcu_appl_data_store(swimcup, 0, &(swimcu_pm_data[0]), count);
+	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		pr_err("%s: failed to clear TOD stored on MCU\n", __func__);
+	}
+
+	/* perform MCU LPO calibration */
+	swimcu_pm_lpo_calibrate_start(swimcup);
 }
 
 /************
@@ -1373,7 +1425,16 @@ void swimcu_pm_data_restore(struct swimcu *swimcup)
 		}
 	}
 
-	swimcu_pm_rtc_restore(swimcup);
+	if (swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME] > 0)
+	{
+		/* Restore the calibration data */
+		mutex_lock(&swimcup->calibrate_mutex);
+		swimcup->calibrate_mcu_time =
+				swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME];
+		swimcup->calibrate_mdm_time =
+			swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME];
+		mutex_unlock(&swimcup->calibrate_mutex);
+	}
 
 	if (swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL] == 0)
 	{
@@ -2137,7 +2198,7 @@ static ssize_t update_store(struct kobject *kobj,
 	struct swimcu *swimcu = container_of(kobj, struct swimcu, pm_firmware_kobj);
 
 	/* stop the LPO calibration before MCUFW update */
-	(void)swimcu_lpo_calibrate_do_enable(swimcu, false);
+	(void)swimcu_lpo_calibrate_do_enable(swimcu, SWIMCU_DISABLE);
 
 	/* transition the MCU to boot mode, reset then required to continue firmware update */
 	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == swimcu_to_boot_transit(swimcu)) {
@@ -2525,6 +2586,54 @@ static const struct kobj_attribute swimcu_lpo_calibrate_enable_attr = {
 		.mode = S_IRUGO | S_IWUSR | S_IWGRP },
 	.show = &swimcu_lpo_calibrate_enable_attr_show,
 	.store = &swimcu_lpo_calibrate_enable_attr_store,
+};
+
+/* sysfs entries to initiate restoration of TOD from MCU data */
+static ssize_t swimcu_tod_update_attr_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", swimcu_pm_tod_update_status);
+}
+
+static ssize_t swimcu_tod_update_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct swimcu *swimcup = container_of(kobj, struct swimcu, pm_calibrate_kobj);
+	int tmp, ret;
+
+	/* This is one-time restoration operation for each startup */
+	if (swimcu_pm_tod_update_status != SWIMCU_CALIBRATE_TOD_UPDATE_AVAIL)
+	{
+		return -EPERM;
+	}
+
+	if (0 != (ret = kstrtoint(buf, 0, &tmp)))
+	{
+		ret = -EINVAL;
+	}
+	else if (tmp)
+	{
+		swimcu_pm_tod_update(swimcup);
+		ret = count;
+	}
+	else
+	{
+		ret = -ERANGE;
+	}
+
+	if (ret < 0) {
+		pr_err("%s: input error %s ret %d\n", __func__, buf, ret);
+	}
+
+	return ret;
+};
+
+static const struct kobj_attribute swimcu_tod_update_attr = {
+	.attr = {
+		.name = "tod_update",
+		.mode = S_IRUGO | S_IWUSR | S_IWGRP },
+	.show = &swimcu_tod_update_attr_show,
+	.store = &swimcu_tod_update_attr_store,
 };
 
 /************
@@ -3149,19 +3258,23 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		kobject_uevent(&swimcu->pm_calibrate_kobj, KOBJ_ADD);
 
-		/* start the calibration if previous calibration duration shorter than ideal */
-		if (swimcu->calibrate_mcu_time < SWIMCU_CALIBRATE_TIME_DEFAULT)
+		/* Start calibration if no post-ULPM TOD udpate will be performed;
+		*  otherwise, expose the "tod_update" node for user to trigger TOD
+		*  update, after which the calibration will be started
+		*/
+		if (swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_TOD] == 0)
 		{
-			swimcu_lpo_calibrate_mcu_time = SWIMCU_CALIBRATE_TIME_DEFAULT;
-			ret = swimcu_lpo_calibrate_do_enable(swimcu, SWIMCU_ENABLE);
+			swimcu_pm_lpo_calibrate_start(swimcu);
+		}
+		else
+		{
+			swimcu_pm_tod_update_status = SWIMCU_CALIBRATE_TOD_UPDATE_AVAIL;
+			ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_tod_update_attr.attr);
 			if (ret)
 			{
-				pr_err("%s: Failed to start MCU timer calibration %d\n", __func__, ret);
-			}
-			else
-			{
-				swimcu_log(INIT, "%s: MCU LPO calibration started %d\n",
-					__func__, swimcu_lpo_calibrate_mcu_time);
+				pr_err("%s: cannot create CALIBRATE TOD restore node\n", __func__);
+				ret = -ENOMEM;
+				goto sysfs_add_exit;
 			}
 		}
 	}
