@@ -157,10 +157,9 @@ int swimcu_gpio_irq_support_check(enum swimcu_gpio_index gpio)
 		return -EPERM;
 	}
 
-	if ((swimcu_gpio_cfg[gpio].mux != MCI_MCU_PIN_FUNCTION_GPIO) ||
-		(swimcu_gpio_cfg[gpio].dir != MCI_MCU_PIN_DIRECTION_INPUT))
+	if (swimcu_gpio_cfg[gpio].dir != MCI_MCU_PIN_DIRECTION_INPUT)
 	{
-		pr_err("%s: GPIO %d not configured\n", __func__, gpio);
+		pr_err("%s: GPIO %d not configured as input\n", __func__, gpio);
 		return -EPERM;
 	}
 
@@ -411,10 +410,17 @@ static int _swimcu_gpio_set(struct swimcu *swimcu,
 	}
 
 	pin_statep = &(swimcu_gpio_cfg[gpio]);
+
+	/* configure the gpio regardless of the pin export status in sysfs */
 	if (action != SWIMCU_GPIO_NOOP && pin_statep->mux != MCI_MCU_PIN_FUNCTION_GPIO)
-	{
-		pr_err("%s: MCU pin %d is not configured as GPIO\n", __func__, gpio);
-		return -EPERM;
+        {
+		pr_info("%s: setting MCU pin as GPIO %d\n", __func__, gpio);
+		ret = swimcu_gpio_open(swimcu, gpio);
+		if (ret)
+		{
+			pr_err("%s: failed to set MCU pin as GPIO %d err=%d\n", __func__, gpio, ret);
+			return ret;
+		}
 	}
 
 	/* Lock the cached config as attributes may change in the following process.
