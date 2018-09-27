@@ -315,6 +315,13 @@ static int bam_dmux_power_state;
 
 static void *bam_ipc_log_txt;
 
+/* SWISTART */
+#ifdef CONFIG_SIERRA
+/* A Boolean flag to indicate whether SIERRA PSM power off process is ongoing */
+static bool msm_bam_dmux_psm_poweroff = false;
+#endif
+/* SWISTOP */
+
 #define BAM_IPC_LOG_PAGES 5
 
 /**
@@ -1875,6 +1882,15 @@ static int ssrestart_check(void)
 		return 1;
 	}
 
+/* SWISTART */
+#ifdef CONFIG_SIERRA
+	if (msm_bam_dmux_psm_poweroff) {
+		DMUX_LOG_KERR("%s: do not restart modem during PSM power off\n", __func__);
+		return 1;
+	}
+#endif
+/* SWISTOP */
+
 	DMUX_LOG_KERR(
 		"%s: fatal modem interaction: BAM DMUX disabled for SSR\n",
 								__func__);
@@ -2590,6 +2606,19 @@ void msm_bam_dmux_reinit(void)
 	bam_mux_initialized = 0;
 }
 EXPORT_SYMBOL(msm_bam_dmux_reinit);
+
+/* SWISTART */
+#ifdef CONFIG_SIERRA
+/**
+ * msm_bam_dmux_psm_poweroff_set() - to set msm_bam_dmux_psm_poweroff flag
+ */
+void msm_bam_dmux_psm_poweroff_set(bool poweroff)
+{
+	BAM_DMUX_LOG("%s: set PSM power off %d\n",__func__, poweroff);
+	msm_bam_dmux_psm_poweroff = poweroff;
+}
+#endif
+/* SWISTOP */
 
 /**
  * set_rx_buffer_ring_pool() - Configure the size of the rx ring pool to a

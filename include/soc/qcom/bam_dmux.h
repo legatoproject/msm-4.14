@@ -85,6 +85,13 @@ int msm_bam_dmux_is_ch_low(uint32_t id);
 int msm_bam_dmux_reg_notify(void *priv,
 		       void (*notify)(void *priv, int event_type,
 						unsigned long data));
+
+/* SWISTART */
+#ifdef CONFIG_SIERRA
+void msm_bam_dmux_psm_poweroff_set(bool poweroff);
+#endif
+/* SWISTOP */
+
 #else
 static inline int msm_bam_dmux_open(uint32_t id, void *priv,
 		       void (*notify)(void *priv, int event_type,

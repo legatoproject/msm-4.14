@@ -27,7 +27,7 @@
 #include <linux/mfd/swimcu/mciprotocol.h>
 #include <linux/mfd/swimcu/mcidefs.h>
 #include <mach/swimcu.h>
-
+#include <soc/qcom/bam_dmux.h>
 
 #define SWIMCU_DISABLE                       0
 #define SWIMCU_ENABLE                        1
@@ -1953,7 +1953,16 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		goto ULPM_CONFIG_FAILED;
 	}
 
-	if(PM_STATE_SYNC == swimcu_pm_state) {
+	if(PM_STATE_SYNC == swimcu_pm_state)
+	{
+		if (SWIMCU_PM_PSM_SYNC == pm)
+		{
+			/* Modem may have shutdown at this point of PSM power off sequence.
+			*  Notify BAM DMUX driver not to treat failure as modem crash.
+			*/
+			swimcu_log(INIT, "%s: Set PSM power off sequence flag to BAM DMUX\n",__func__);
+			msm_bam_dmux_psm_poweroff_set(true);
+		}
 		call_usermodehelper(poweroff_argv[0], poweroff_argv, NULL, UMH_NO_WAIT);
 	}
 
