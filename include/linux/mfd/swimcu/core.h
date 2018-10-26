@@ -27,15 +27,16 @@
 #define SWIMCU_APPL_I2C_FREQ    100
 #define SWIMCU_APPL_I2C_ID      1
 
-#define SWIMCU_PM_OFF             0  /* ULPM/PSM disabled */
-#define SWIMCU_PM_BOOT_SOURCE     1  /* To request PSM-ULPM fallback with user wakeup sources */
-#define SWIMCU_PM_POWER_SWITCH    2  /* To request ULPM without user wakeup sources */
-#define SWIMCU_PM_PSM_SYNC        3  /* To enter PSM state */
-#define SWIMCU_PM_PSM_IN_PROGRESS 4  /* PSM request in progress */
-#define SWIMCU_PM_PSM_REQUEST     5  /* To request PSM */
-#define SWIMCU_PM_ULPM_FALLBACK   6  /* To request ULPM with user wakeup sources*/
+#define SWIMCU_PM_OFF                 0  /* To request turning off PSM and ULPM */
+#define SWIMCU_PM_PSM_ULPM_FALLBACK   1  /* To request PSM with ULPM fallback */
+#define SWIMCU_PM_POWER_OFF           2  /* To request power off (enter ULPS without user wakeup sources) */
+#define SWIMCU_PM_PSM_SYNC            3  /* To indicate PSM ready for power off synchronization (by PSMD) */
+#define SWIMCU_PM_NONE                4  /* No request */
+#define SWIMCU_PM_PSM_ENABLE          5  /* To request PSM with user-defined wakeup sources*/
+#define SWIMCU_PM_ULPM_ENABLE         6  /* To request ULPM with user-defined wakeup sources */
 
-#define SWIMCU_PM_MAX             SWIMCU_PM_ULPM_FALLBACK
+#define SWIMCU_PM_REQUEST_MIN         SWIMCU_PM_OFF
+#define SWIMCU_PM_REQUEST_MAX         SWIMCU_PM_ULPM_ENABLE
 
 #define SWIMCU_ADC_VREF         1800
 #define SWIMCU_ADC_INTERVAL_MAX 65535

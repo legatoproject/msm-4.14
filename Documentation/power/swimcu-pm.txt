@@ -1,19 +1,31 @@
 Sierra Wireless MCU Ultra Low Power Management
 	(C) 2016 Sierra Wireless, GPL
 
-V1.02
+V1.03
 
-The Sierra Wireless WP product series are equipped with an
-on-board MCU whose prime function is to allow the system to
-operate in a very low power mode (ultra low power mode or ULPM).
-In this mode, power is removed from the main MDM chip, while the
-MCU runs at the lowest possible current consumption monitoring
-for configured boot conditions. When triggered, the MCU then
-restores power to boot the MDM. The MCU provides GPIO and ADC
-services in support of boot options.
+The Sierra Wireless WP product series are equipped with an on-board
+MCU whose prime function is to allow the system to operate in a very
+low power state (Ultra Low Power State or ULPS). In this state, power
+is removed from the main MDM chip, while the MCU runs at the lowest
+possible current consumption monitoring for configured boot conditions
+When triggered, the MCU then restores power to boot the MDM. The MCU
+provides GPIO and ADC services in support of boot options. This power
+operation mode is referred as Ultra Low Power Mode, or ULPM.
 
-The MCU kernel driver provides a sysfs interface to query and
-configure the MCU I/O and boot conditions from ULPM.
+The Sierra Wireless WP76/77 series also supports Power Saving Mode (PSM).
+PSM is a 3GPP Release 12 feature to improve the power management of User
+Equipment (UE) and to prevent network (NW) congestion. The PSM operation
+is controlled by two timers. Active Timer (T3324) defines the time the
+UE stays active after entering idle mode following an Attach or Tracking
+Area Update (TAU) procedure. PSM Timer (T3412) defines the extended time
+for the UE to send next periodic TAU. During Active Time, the network
+can still access the UE. After Active Time elapse, the network will not
+access the UE anymore and the UE is free to power off itself or enter
+a low power mode. However, the UE may access the registered network at
+any point of time without Attach procedure.
+
+The MCU kernel driver provides a sysfs interface to query and configure
+the MCU I/O and boot conditions for ULPM and PSM operations.
 
 
 1. GPIO
@@ -121,7 +133,112 @@ The boot source will need to be reenabled in this case.
 Note the timer will start immediately when ULPM request is accepted.
 
 
-4. MCU Firmware Version
+4. Power Saving Mode (PSM)
+==========================
+
+All modules of WP76xx/77xx families supports PSM. A set of sysfs nodes
+are provided for PSM configuration:
+
+/sys/module/swimcu_pm/psm/active_time
+  (T3324 value in seconds, must conform to GPRS TIMER2 format)
+
+/sys/module/swimcu_pm/psm/psm_time
+  (T3412 value in seconds, must conform to GPRS TIMER3 format)
+
+/sys/module/swimcu_pm/psm/enable
+  (Value     Description
+     0       To request disable PSM
+     1       To request enable PSM with ULPM fallback
+     2       To request power off module
+     3       DO NOT USE!!!
+     4       No request
+     5       To request enable psm only
+     6       To request ULPM only)
+
+/sys/module/swimcu_pm/psm/status
+  (Value     Description
+   -17       ULPM failed to enter ULPS.
+   -16       Failed to configure wakeup sources.
+   -15       No wakeup source configured to wake from ULPS.
+   -11       PSM client failed to request PSM in OOS or LS.
+   -10       Network with Limited Service (LS).
+    -9       Network out of service (OOS).
+    -8       PSM request is rejected due to short PSM time.
+    -7       PSM request is rejected due to PSM time longer than modem.
+    -6       PSM request is rejected due to modem not ready.
+    -5       PSM request is rejected due to PSM not enabled.
+    -4       Invalid PSM time requested.
+    -3       Invalid active time requested.
+    -2       Failed to send PSM request.
+    -1       QMI DMS service not ready for accept request.
+     0       Initial status.
+     1       Waiting for QMI DMS service ready.
+     2       QMI DMS service ready to accept request.
+     3       Requested to disable PSM.
+     4       Requested to enable PSM.
+     5       Modem is ready for PSM.
+     6       Modem is not ready for PSM.
+     7       PSM transition is completed on modem.
+     8       PSM is enabled.
+     9       PSM is disabled.
+    10       PSM client has requested PSM in OOS or LS.
+    15       ULPM is requeseted.
+    16       ULPM is requeseted as fallback from PSM failure.
+    17       ULPM Entered Ultra Low Power State successfully.)
+
+I2C messaging handshake is used for MCU to synchronize with the MDM
+power state. Two more sysfs nodes are provided for user to query and
+configure supported synchronization options:
+
+/sys/module/swimcu_pm/psm/sync_support
+  (Bit mask shows the options of synchronization settings supported by MCU.
+   0b0001 - Option A
+       MCU I2C is always on during PSM, waiting for MDM message;
+       MDM RTC Alarm is used as the timer wakeup source.
+   0b0010 - Option B
+       MCU I2C is only on near the end of PSM, waiting for MDM message;
+       MDM RTC Alarm is used as the timer wakeup source.
+   0b0100 - Option C
+       MCU I2C is on at the end of PSM;
+       MCU RTC Alarm is used as the timer wakeup source;
+       MDM is completely powered off.)
+
+/sys/module/swimcu_pm/psm/sync_select
+  (Bit position in the 'sync_support' mask selects the sync settings
+   1 - Option A, average current during PSM: ~210  uA
+   2 - Option B, average current during PSM:  ~22.5uA
+   3 - Option C, average current during PSM:   ~6.9uA)
+
+Besides the timer boot condition, the GPIO and ADC wakeup sources can
+also be configure as boot conditions to wake from PSM.
+
+
+5. PSM with ULPM fallback
+==========================
+
+An option is provided for user to request PSM with ULPM as fallback.
+When this option is requested, a PSM request is sent to a registered
+network. If the PSM request is honored by the network, autonomous PSM
+will occur. If the PSM request is rejected by the netwrok, a ULPM
+operation will start immediately. As a result, the MDM will be powered
+off immediately with a timer boot condition, configured with the PSM
+time (T3412 value) as the timeout value. Any other GPIO and ADC boot
+condition configured for the PSM will also take effect for the ULPM.
+On exit from ULPM, a normal Attach procedure will be performed between
+UE and NW.
+
+Note the following sysfs node pairs are alias to each other:
+
+	'/sys/module/swimcu_pm/psm/psm_time'
+and
+	'/sys/module/swimcu_pm/boot_source/timer/timeout'
+
+	'sys/module/swimcu_pm/psm/enable'
+and
+	'/sys/module/swimcu_pm/boot_source/enable'
+
+
+6. MCU Firmware Version
 ==========================
 
 The current MCU firmware version may be queried from:
@@ -133,7 +250,7 @@ on the MCU. If communication with the MCU is lost after boot up, a
 version of 000.000 is returned.
 
 
-5. Debug
+7. Debug
 ===============
 
 a) Logging

@@ -32,6 +32,17 @@
 #define SWIMCU_DISABLE                       0
 #define SWIMCU_ENABLE                        1
 
+/* status code for ULPM operations */
+#define SWIMCU_PM_STATUS_ULPM_FAILED         (-17)  /* Failed to enter ULPS */
+#define SWIMCU_PM_STATUS_WUSRC_CFG_FAILURE   (-16)  /* Failed to configure wakeup source */
+#define SWIMCU_PM_STATUS_NO_WUSRC_CFG        (-15)  /* No wakeup source configured */
+
+#define SWIMCU_PM_STATUS_NONE                (0)
+
+#define SWIMCU_PM_STATUS_ULPM_REQUESTED      (15)    /* ULPM is requested */
+#define SWIMCU_PM_STATUS_ULPM_FALLBACK       (16)    /* ULPM is requested as fallback from PSM failure */
+#define SWIMCU_PM_STATUS_ULPM_COMPLETED      (17)    /* ULPM Entered ULPS successfully	*/
+
 /* Maximum time value allowed in configuration of MCU functionality
 *  40 days and 40 nights (in seconds).
 */
@@ -49,7 +60,7 @@
 #define SWIMCU_CALIBRATE_TIME_DEFAULT        30000    /* milliseconds */
 
 #define SWIMCU_CALIBRATE_MDM2MCU             1
-#define SWIMCU_CALIBRATE_MCU2MDM             -1
+#define SWIMCU_CALIBRATE_MCU2MDM             (-1)
 
 /* The MCU timer timeout value is trimmed off by this percentage
 *  to mitigate possible deviation for the MCU LPO 1K clock over
@@ -60,7 +71,7 @@
 /* Values for TOD update status variable */
 #define SWIMCU_CALIBRATE_TOD_UPDATE_AVAIL    0
 #define SWIMCU_CALIBRATE_TOD_UPDATE_OK       1
-#define SWIMCU_CALIBRATE_TOD_UPDATE_FAILED   -1
+#define SWIMCU_CALIBRATE_TOD_UPDATE_FAILED   (-1)
 
 /* Constants for MCU watchdog feature */
 #define SWIMCU_WATCHDOG_TIMEOUT_INVALID      0
@@ -315,8 +326,9 @@ static char* poweroff_argv[] = {"/sbin/poweroff", NULL};
 #define PM_STATE_SHUTDOWN 2
 
 /* Power management configuration */
-static int swimcu_pm_enable = SWIMCU_PM_OFF;
+static int swimcu_pm_enable = SWIMCU_PM_NONE;  /* no request */
 static int swimcu_pm_state = PM_STATE_IDLE;
+static int swimcu_pm_status = SWIMCU_PM_STATUS_NONE;
 
 /* MCU watchdog configuration */
 static int swimcu_watchdog_enable  = SWIMCU_DISABLE;
@@ -324,7 +336,7 @@ static u32 swimcu_watchdog_timeout = SWIMCU_WATCHDOG_TIMEOUT_INVALID;
 static u32 swimcu_watchdog_reset_delay = SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT;
 static u32 swimcu_watchdog_renew_count = 0;
 
-/* MCU psm support configuration (psm time is aliased to ulpm time) */
+/* PSM support configuration (psm time is aliased to ulpm time) */
 static u32 swimcu_psm_active_time = 0;
 static enum mci_protocol_pm_psm_sync_option_e
                 swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
@@ -1851,22 +1863,58 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	enum mci_protocol_hw_timer_state_e timer_state;
 	uint32_t timeout = 0;
 
-	if ((pm < SWIMCU_PM_OFF) || (pm > SWIMCU_PM_MAX))
+	switch (pm)
 	{
-		swimcu_log(PM, "%s: invalid power mode %d\n", __func__, pm);
+	case SWIMCU_PM_OFF:
+	case SWIMCU_PM_PSM_ENABLE:
+	case SWIMCU_PM_PSM_ULPM_FALLBACK:
+	case SWIMCU_PM_NONE:
+
+		/* Handled in the glue logic */
+		pr_info("%s: Request PM %d\n", __func__, pm);
+		return 0;
+
+	case SWIMCU_PM_PSM_SYNC:
+
+		/* PSMD Indicated it is ready to sync with MCU for power down */
+		pr_info("%s: SWIMCU_PM_PSM_SYNC - continue sync with MCU\n",__func__);
+		break;
+
+	case SWIMCU_PM_ULPM_ENABLE:
+
+		if (swimcu->version_major == 0 && swimcu->version_minor == 0)
+		{
+			/* ULPM is not supported if no MCU installed or no MCUFW running */
+			pr_err("%s: ULPM REQ (%d) is not supported on this module\n",__func__, pm);
+			return -EINVAL;
+		}
+
+		/* ULPM is not handled by PSM glue-logic */
+		swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_REQUESTED;
+		sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
+
+		pr_info("%s: SWIMCU_PM_ULPS_ENTER - continue sync with MCU\n",__func__);
+		break;
+
+	case SWIMCU_PM_POWER_OFF:
+
+		/* User requested system shutdown */
+		if (swimcu->version_major == 0 && swimcu->version_minor == 0)
+		{
+			/* Power off now since no MCU installed or MCUFW not running */
+			pr_info("%s: SWIMCU_PM_POWER_OFF - power down now\n",__func__);
+			swimcu_pm_state = PM_STATE_SHUTDOWN;
+			call_usermodehelper(poweroff_argv[0], poweroff_argv, NULL, UMH_NO_WAIT);
+			return 0;
+		}
+
+		/* Continue sync with MCU to power off */
+		break;
+
+	default:
+
+		pr_err("%s: invalid power mode %d\n", __func__, pm);
 		return -ERANGE;
-	}
-
-	if (pm == SWIMCU_PM_OFF) {
-		swimcu_log(PM, "%s: disable\n", __func__);
-		return 0;
-	}
-
-	if (pm == SWIMCU_PM_PSM_REQUEST ||
-	    pm == SWIMCU_PM_PSM_IN_PROGRESS ||
-	    pm == SWIMCU_PM_BOOT_SOURCE) {
-		swimcu_log(PM, "%s: PSM request in progress %d\n",__func__, pm);
-		return 0;
 	}
 
 	if (SWIMCU_ENABLE == swimcu_lpo_calibrate_enable)
@@ -1893,20 +1941,23 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	}
 
 	/* Wakeup source must be configured except the software power down case */
-	if (pm != SWIMCU_PM_POWER_SWITCH)
+	if (pm != SWIMCU_PM_POWER_OFF)
 	{
 		ret = swimcu_pm_wusrc_config(swimcu, pm, &cfg_state);
 		if (ret != 0)
 		{
+			swimcu_pm_status = SWIMCU_PM_STATUS_WUSRC_CFG_FAILURE;
 			goto ULPM_CONFIG_FAILED;
 		}
 		pr_err("%s: wakeup source setup mask=0x%x\n", __func__, cfg_state.wusrc_mask);
 	}
 
 
-	if (!cfg_state.wusrc_mask && (pm != SWIMCU_PM_POWER_SWITCH))
+	if (!cfg_state.wusrc_mask && (pm != SWIMCU_PM_POWER_OFF))
 	{
 		pr_err("%s: no wake sources set for PSM/ULPM request %d\n", __func__, pm);
+		ret = -EINVAL;
+		swimcu_pm_status = SWIMCU_PM_STATUS_NO_WUSRC_CFG;
 		goto ULPM_CONFIG_FAILED;
 	}
 
@@ -1946,8 +1997,14 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	{
 		pr_err("%s: pm enable fail %d\n", __func__, rc);
 		ret = -EIO;
+
+		swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_FAILED;
 		goto ULPM_CONFIG_FAILED;
 	}
+
+	/* notify the glue-logic of the status */
+	swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_COMPLETED;
+	sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
 
 	if(PM_STATE_SYNC == swimcu_pm_state)
 	{
@@ -1965,6 +2022,9 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	return 0;
 
 ULPM_CONFIG_FAILED:
+
+	/* notify the glue-logic of the status */
+	sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
 
 	/* reverse the wakeup source configuration */
 	swimcu_pm_wusrc_config_reset(swimcu, &cfg_state);
@@ -2114,26 +2174,48 @@ static ssize_t pm_timer_timeout_attr_store(struct kobject *kobj,
 	return ret;
 };
 
+static ssize_t enable_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", swimcu_pm_enable);
+}
+
 static ssize_t enable_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	int ret;
+	struct swimcu *swimcup;
 	int tmp_enable;
-	struct swimcu *swimcu = container_of(kobj, struct swimcu, pm_boot_source_kobj);
+	int ret;
 
 	ret = kstrtoint(buf, 0, &tmp_enable);
 	if (0 == ret)
 	{
-		ret = pm_set_mcu_ulpm_enable(swimcu, tmp_enable);
-		if (0 == ret) {
+		if (tmp_enable < SWIMCU_PM_REQUEST_MIN || tmp_enable > SWIMCU_PM_REQUEST_MAX)
+		{
+			pr_err("%s: invalid input %s (%d~%d)\n",
+				__func__, buf, SWIMCU_PM_REQUEST_MIN, SWIMCU_PM_REQUEST_MAX);
+			ret = -EINVAL;
+		}
+		else
+		{
+			swimcup = container_of(kobj, struct swimcu, pm_boot_source_kobj);
+
 			swimcu_pm_enable = tmp_enable;
-			sysfs_notify(&swimcu->pm_psm_kobj, NULL, "enable");
-			ret = count;
+			sysfs_notify(kobj, NULL, "enable");
+
+			ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
+			if (0 == ret)
+			{
+				ret = count;
+			}
 		}
 	}
 
 	if (ret < 0)
-		pr_err("%s: invalid input %s ret %d\n", __func__, buf, ret);
+	{
+		pr_err("%s: Failed to enable mode %d: %d\n", __func__, swimcu_pm_enable, ret);
+	}
+
 	return ret;
 };
 
@@ -2666,8 +2748,11 @@ void swimcu_watchdog_event_handle(struct swimcu *swimcup, u32 delay)
 	char event_str[] = "MCU_WATCHDOG";
 	char *envp[] = { event_str, NULL };
 
-	if (swimcu_pm_enable > SWIMCU_PM_OFF) {
-		pr_err("%s: ULPM (%d) requested, do not renew watchdog\n", __func__, swimcu_pm_enable);
+	if (swimcu_pm_enable == SWIMCU_PM_ULPM_ENABLE ||
+		swimcu_pm_enable == SWIMCU_PM_PSM_SYNC ||
+		swimcu_pm_enable == SWIMCU_PM_POWER_OFF)
+	{
+		pr_err("%s: Power mode (%d) requested, do not renew watchdog\n", __func__, swimcu_pm_enable);
 		return;
 	}
 
@@ -2771,6 +2856,7 @@ static ssize_t swimcu_psm_sync_select_attr_store(struct kobject *kobj,
 		*/
 		if ((sync_select > 0) && ((1 << sync_select) & sync_support_mask)) {
 			swimcu_psm_sync_select = (enum mci_protocol_pm_psm_sync_option_e) sync_select;
+			sysfs_notify(kobj, NULL, "sync_select");
 			ret = count;
 		} else {
 			ret = -EINVAL;
@@ -2800,19 +2886,32 @@ static ssize_t swimcu_psm_enable_attr_store(struct kobject *kobj,
 	ret = kstrtouint(buf, 0, &tmp_enable);
 	if (0 == ret)
 	{
-		swimcup = container_of(kobj, struct swimcu, pm_psm_kobj);
-		ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
-		if (0 == ret) {
-			swimcu_pm_enable = tmp_enable;
-			sysfs_notify(kobj, NULL, "enable");
-			ret = count;
-		} else {
+		if (tmp_enable < SWIMCU_PM_REQUEST_MIN || tmp_enable > SWIMCU_PM_REQUEST_MAX)
+		{
+			pr_err("%s: invalid input %s (%d~%d)\n",
+				__func__, buf, SWIMCU_PM_REQUEST_MIN, SWIMCU_PM_REQUEST_MAX);
 			ret = -EINVAL;
 		}
-	} else {
-		ret = -EINVAL;
-		pr_err("%s: invalid input %s\n", __func__, buf);
+		else
+		{
+			swimcu_pm_enable = tmp_enable;
+			sysfs_notify(kobj, NULL, "enable");
+
+			swimcup = container_of(kobj, struct swimcu, pm_psm_kobj);
+			ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
+			if (0 == ret)
+			{
+				ret = count;
+			}
+
+		}
 	}
+
+	if (ret < 0)
+	{
+		pr_err("%s: Failed to enable mode %d: %d \n", __func__, swimcu_pm_enable, ret);
+	}
+
 	return ret;
 }
 
@@ -2912,7 +3011,43 @@ static const struct kobj_attribute swimcu_psm_time_attr = {
 	.store = &swimcu_psm_time_attr_store,
 };
 
-SWIMCU_PM_INT_ATTR(psm_status, 0, -11, 13, "status", true)
+static ssize_t swimcu_pm_status_attr_show(
+	struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%i\n", swimcu_pm_status);
+}
+
+static ssize_t swimcu_pm_status_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int value;
+	int ret = kstrtoint(buf, 0, &value);
+	if (ret || value < SWIMCU_PM_STATUS_ULPM_FAILED ||
+			value > SWIMCU_PM_STATUS_ULPM_COMPLETED)
+	{
+		ret = -EINVAL;
+		pr_err("%s: invalid input %s (%i~%i)\n", __func__, buf,
+			SWIMCU_PM_STATUS_ULPM_FAILED, SWIMCU_PM_STATUS_ULPM_COMPLETED);
+	} else {
+		if (swimcu_pm_status != value)
+		{
+			swimcu_pm_status = value;
+			sysfs_notify(kobj, NULL, "status");
+		}
+		ret = count;
+	}
+	return ret;
+}
+
+static const struct kobj_attribute swimcu_psm_status_attr = {
+	.attr = {
+		.name = "status",
+		.mode = S_IRUGO | S_IWUSR | S_IWGRP
+	},
+	.show = &swimcu_pm_status_attr_show,
+	.store = &swimcu_pm_status_attr_store,
+};
 
 /************
 *
@@ -2996,7 +3131,7 @@ static const struct kobj_attribute pm_timer_timeout_attr[] = {
 };
 
 /* sysfs entries to set boot_source enable */
-static const struct kobj_attribute swimcu_pm_enable_attr = __ATTR_WO(enable);
+static const struct kobj_attribute swimcu_pm_enable_attr = __ATTR_RW(enable);
 
 /* sysfs entries to clear wakeup source of selected types */
 static const struct kobj_attribute swimcu_pm_wusrc_clear_attr = __ATTR_WO(clear);
