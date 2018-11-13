@@ -1124,11 +1124,7 @@ static enum mci_protocol_pm_psm_sync_option_e
 swimcu_pm_psm_sync_option_default(
 	struct swimcu *swimcup)
 {
-	if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_3)
-	{
-		return MCI_PROTOCOL_PM_PSM_SYNC_OPTION_C;
-	}
-	else if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_2)
+	if (swimcup->opt_func_mask & (MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_2 | MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_3))
 	{
 		return MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B;
 	}
