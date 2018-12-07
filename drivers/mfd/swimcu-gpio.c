@@ -278,6 +278,9 @@ static int _swimcu_gpio_get(
 
 			break;
 
+		case SWIMCU_GPIO_GET_PULL:   /* use cached value; do nothing */
+
+			break;
 		case SWIMCU_GPIO_GET_VAL:   /* use current value on MCU */
 		case SWIMCU_GPIO_NOOP:      /* refresh the cached states from MCU */
 
@@ -320,25 +323,19 @@ static int _swimcu_gpio_get(
 
 		case SWIMCU_GPIO_GET_PULL:
 
-  		if (swimcu_gpio_cfg[gpio].dir != MCI_MCU_PIN_DIRECTION_INPUT) {
+  			if (swimcu_gpio_cfg[gpio].dir != MCI_MCU_PIN_DIRECTION_INPUT)
+			{
 				pr_err ("%s: illegal operation to get PULL for output pin %d\n", __func__, gpio);
 				return -EPERM;
 			}
 
 			if (!swimcu_gpio_cfg[gpio].params.input.pe)
 			{
-				*valuep = SWIMCU_GPIO_PULL_NONE;
+				*valuep = MCI_MCU_PIN_PULL_NONE;
 			}
 			else
 			{
-				if (swimcu_gpio_cfg[gpio].params.input.ps)
-				{
-					*valuep = SWIMCU_GPIO_PULL_UP;
-				}
-				else
-				{
-					*valuep = SWIMCU_GPIO_PULL_DOWN;
-				}
+				*valuep = (swimcu_gpio_cfg[gpio].params.input.ps == MCI_MCU_PIN_PULL_DOWN) ? 0 : 1;
 			}
 			break;
 
@@ -518,8 +515,16 @@ static int _swimcu_gpio_set(struct swimcu *swimcu,
 				ret = -EPERM;
 				break;
 			}
-
-			if (!pin_statep->params.input.pe)
+			if (value == MCI_MCU_PIN_PULL_NONE)
+			{
+				if (pin_statep->params.input.pe)
+				{
+					swimcu_log(GPIO, "%s: disable the pull on the pin %d\n", __func__, value);
+					config_changed = true;
+				}
+			}
+			/* enable the pull for all other states */
+			else if (!pin_statep->params.input.pe)
 			{
 				swimcu_log(GPIO, "%s: change PULL OFF to %d\n", __func__, value);
 				config_changed = true;
@@ -537,8 +542,15 @@ static int _swimcu_gpio_set(struct swimcu *swimcu,
 			if (config_changed)
 			{
 				backup_pin_state = swimcu_gpio_cfg[gpio];
-				pin_statep->params.input.ps = (enum mci_mcu_pin_pull_select_e) value;
-				pin_statep->params.input.pe = true;
+				if(value == MCI_MCU_PIN_PULL_NONE)
+				{
+					pin_statep->params.input.pe = false;
+				}
+				else
+				{
+					pin_statep->params.input.ps = (enum mci_mcu_pin_pull_select_e) value;
+					pin_statep->params.input.pe = true;
+				}
 			}
 			break;
 
@@ -645,10 +657,10 @@ int swimcu_gpio_open(struct swimcu *swimcu, int gpio)
 		return 0;
 	}
 
-	/* default to GPIO input pin with internal pull down, interrupt disabled */
+	/* default to GPIO input pin with no pull, interrupt disabled */
 	swimcu_gpio_cfg[gpio].mux = MCI_MCU_PIN_FUNCTION_GPIO;
 	swimcu_gpio_cfg[gpio].dir = MCI_MCU_PIN_DIRECTION_INPUT;
-	swimcu_gpio_cfg[gpio].params.input.pe = true;
+	swimcu_gpio_cfg[gpio].params.input.pe = false;
 	swimcu_gpio_cfg[gpio].params.input.ps = MCI_MCU_PIN_PULL_DOWN;
 	swimcu_gpio_cfg[gpio].params.input.irqc_type = MCI_PIN_IRQ_DISABLED;
 

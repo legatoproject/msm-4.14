@@ -95,7 +95,8 @@ enum mci_mcu_pin_direction_e {
 ************/
 enum mci_mcu_pin_pull_select_e {
     MCI_MCU_PIN_PULL_DOWN = 0,  /* internal pull-down resistor is enabled. */
-    MCI_MCU_PIN_PULL_UP   = 1   /* internal pull-up resistor is enabled.  */
+    MCI_MCU_PIN_PULL_UP   = 1,  /* internal pull-up resistor is enabled.  */
+    MCI_MCU_PIN_PULL_NONE = 2,  /* internal pull is disabled. */
 };
 
 /************

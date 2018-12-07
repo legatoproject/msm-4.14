@@ -267,6 +267,16 @@ static const struct swimcu_irq_type_name_map_s {
 	{MCI_PIN_IRQ_LOGIC_ONE,    "high"},
 };
 
+/* Mapping table for MCU pull type enumerated values and corresponding ASCII strings */
+static const struct swimcu_pull_type_name_map_s {
+	enum mci_mcu_pin_pull_select_e type;
+	char *name;
+} swimcu_pull_type_name_map[] = {
+	{MCI_MCU_PIN_PULL_NONE, "none"},
+	{MCI_MCU_PIN_PULL_DOWN, "down"},
+	{MCI_MCU_PIN_PULL_UP,   "up"},
+};
+
 /* Enumerated index into wakeup source configuration table.
 *  GPIO must be enumerated first: the wakeup source configuration/
 *  recovery operation relies on this ordering.
@@ -2203,6 +2213,84 @@ static ssize_t pm_gpio_edge_attr_store(struct kobject *kobj,
 	return count;
 };
 
+static ssize_t pm_gpio_pull_attr_show(
+		struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	enum wusrc_index wi;
+	int pull_type;
+	int ti;
+	int gpio;
+	int ret = -EINVAL;
+        struct swimcu *swimcup;
+
+	wi = find_wusrc_index_from_kobj(kobj);
+	if ((wi != WUSRC_INVALID) && (wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS)) {
+		gpio = wusrc_param[wi].id;
+	}
+	else {
+		pr_err("%s: unrecognized GPIO %s\n", __func__, kobj->name);
+		return -EINVAL;
+	}
+	gpio = (enum swimcu_gpio_index) wusrc_param[wi].id;
+	swimcup = container_of(kobj->parent, struct swimcu, pm_boot_source_kobj);
+	ret = swimcu_gpio_get(swimcup, SWIMCU_GPIO_GET_PULL, gpio, &pull_type);
+	if (ret)
+        {
+		pr_err("%s: gpio pull is invalid \n",__func__);
+		return ret;
+        }
+
+	for (ti = ARRAY_SIZE(swimcu_pull_type_name_map) - 1; ti > 0; ti--) {
+		if (pull_type == swimcu_pull_type_name_map[ti].type) {
+			swimcu_log(PM, "%s: found gpio %d pull %d\n", __func__, gpio, ti);
+			break;
+		}
+	}
+	ret = scnprintf(buf, PAGE_SIZE, swimcu_pull_type_name_map[ti].name);
+	if (ret > 0) {
+		strlcat(buf, "\n", PAGE_SIZE);
+		ret++;
+	}
+	return ret;
+}
+
+static ssize_t pm_gpio_pull_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{	struct swimcu *swimcup;
+	enum wusrc_index wi;
+	int ti;
+	int gpio;
+	int ret;
+
+	/* find associated GPIO number and pull type */
+	wi = find_wusrc_index_from_kobj(kobj);
+	if ((wi == WUSRC_INVALID) ||
+		(wusrc_param[wi].type != MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS))
+	{
+		pr_err("%s: unrecognized GPIO %s\n", __func__, kobj->name);
+		return -EINVAL;
+	}
+	gpio = wusrc_param[wi].id;
+	for (ti = ARRAY_SIZE(swimcu_pull_type_name_map) - 1; ti >= 0; ti--) {
+	/* if never found we exit at ti == -1: invalid */
+		if (sysfs_streq(buf, swimcu_pull_type_name_map[ti].name))
+			break;
+	}
+	if(ti < 0) {
+		pr_err("%s: unknown pull value %s\n", __func__, buf);
+		return -EINVAL;
+	}
+	swimcup = container_of(kobj->parent, struct swimcu, pm_boot_source_kobj);
+	ret = swimcu_gpio_set(swimcup,
+			SWIMCU_GPIO_SET_PULL, gpio, swimcu_pull_type_name_map[ti].type);
+	if (ret < 0) {
+		pr_err("%s: failed set pull for gpio %d ret=%d\n", __func__, gpio, ret);
+		return ret;
+	}
+	return count;
+
+}
+
 static ssize_t pm_timer_timeout_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
@@ -3171,11 +3259,16 @@ void swimcu_set_reset_source(enum mci_protocol_reset_source_e value)
 
 /* MCU has 2 interruptible GPIOs, PTA0 and PTB0 that map to index 2 and 4
  * respectively on gpiochip200, which in turn appear as GPIO36 and 38 on the WP76xx */
-static const struct kobj_attribute pm_gpio_edge_attr[] = {
+static const struct kobj_attribute pm_gpio_trig_attr[] = {
 	__ATTR(edge,
 		S_IRUGO | S_IWUSR | S_IWGRP,
 		&pm_gpio_edge_attr_show,
 		&pm_gpio_edge_attr_store),
+
+	__ATTR(pull,
+		S_IRUGO | S_IWUSR | S_IWGRP,
+		&pm_gpio_pull_attr_show,
+		&pm_gpio_pull_attr_store),
 };
 
 static const struct kobj_attribute pm_triggered_attr = __ATTR_RO(triggered);
@@ -3275,8 +3368,8 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		char *name;
 		unsigned int num_cust_kobjs;
 	} boot_source[] = {
-		{&swimcu_pm_wusrc_status[WUSRC_GPIO36].kobj, &swimcu->pm_boot_source_kobj,     pm_gpio_edge_attr,     "gpio36", ARRAY_SIZE(pm_gpio_edge_attr)},
-		{&swimcu_pm_wusrc_status[WUSRC_GPIO38].kobj, &swimcu->pm_boot_source_kobj,     pm_gpio_edge_attr,     "gpio38", ARRAY_SIZE(pm_gpio_edge_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_GPIO36].kobj, &swimcu->pm_boot_source_kobj,     pm_gpio_trig_attr,     "gpio36", ARRAY_SIZE(pm_gpio_trig_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_GPIO38].kobj, &swimcu->pm_boot_source_kobj,     pm_gpio_trig_attr,     "gpio38", ARRAY_SIZE(pm_gpio_trig_attr)},
 		{&swimcu_pm_wusrc_status[WUSRC_TIMER].kobj,  &swimcu->pm_boot_source_kobj,     pm_timer_timeout_attr, "timer",  ARRAY_SIZE(pm_timer_timeout_attr)},
 		{&swimcu_pm_wusrc_status[WUSRC_ADC2].kobj,   &swimcu->pm_boot_source_adc_kobj, pm_adc_trig_attr,      "adc2",   ARRAY_SIZE(pm_adc_trig_attr)},
 		{&swimcu_pm_wusrc_status[WUSRC_ADC3].kobj,   &swimcu->pm_boot_source_adc_kobj, pm_adc_trig_attr,      "adc3",   ARRAY_SIZE(pm_adc_trig_attr)},
