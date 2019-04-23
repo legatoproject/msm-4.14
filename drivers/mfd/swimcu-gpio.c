@@ -49,7 +49,7 @@ static const struct {
 *  the latest IRQ type configured by user after the IRQ event is successfully
 *  processed.
 */
-enum mci_pin_irqc_type_e swimcu_gpio_irq_cfg[SWIMCU_NUM_GPIO_IRQ] = {MCI_PIN_IRQ_DISABLED};
+static struct swimcu_gpio_irq_cfg gpio_irq_cfg[SWIMCU_NUM_GPIO_IRQ] = {0};
 
 /* Pointer for the GPIO IRQ handler provided by the user (GPIO-SWIMCU) */
 bool (*swimcu_gpio_irqp)(struct swimcu*, enum swimcu_gpio_irq_index) = NULL;
@@ -173,7 +173,7 @@ int swimcu_gpio_irq_support_check(enum swimcu_gpio_index gpio)
  * Purpose:  set the irq trigger for a particular gpio
  *
  * Parms:    irq  - SWIMCU GPIO IRQ index
- *           type - MCU IRQ control type (rising, falling, etc).
+ *           irq_cfg - MCU IRQ config (enable/disable, rising, falling, etc)
  *
  * Return:   0 if success
  *           -ERRNO otherwise
@@ -184,15 +184,22 @@ int swimcu_gpio_irq_support_check(enum swimcu_gpio_index gpio)
  * Abort:    none
  *
  ************/
-int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq, int type)
+int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq,
+		struct swimcu_gpio_irq_cfg *irq_cfg)
 {
+	if(!irq_cfg)
+	{
+		pr_err("%s: irq_cfg null",__func__);
+		return -EINVAL;
+	}
+
 	if (irq <= SWIMCU_GPIO_NO_IRQ && irq >= SWIMCU_NUM_GPIO_IRQ)
 	{
 		pr_err("%s: Invalid IRQ %d\n", __func__, irq);
 		return -EPERM;
 	}
 
-	swimcu_gpio_irq_cfg[irq] = type;
+	gpio_irq_cfg[irq] = *irq_cfg;
 	return 0;
 }
 
@@ -202,21 +209,33 @@ int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq, int type)
  *
  * Purpose:  get the irq trigger for a particular gpio
  *
- * Parms:    gpio - a valid gpio index
+ * Parms:    irq - GPIO IRQ index
+ *           irq_cfg - IRQ config (enable/disable, rising, falling, etc)
  *
- * Return:   irq control type (rising, falling, etc).
+ * Return:   0 if success
+ *           -ERRNO otherwise
  *
  * Abort:    none
  *
  ************/
-int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq)
+int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq,
+		struct swimcu_gpio_irq_cfg *irq_cfg)
 {
-	if (irq > SWIMCU_GPIO_NO_IRQ || irq < SWIMCU_NUM_GPIO_IRQ)
+	int ret = -EINVAL;
+
+	if(!irq_cfg)
 	{
-		return swimcu_gpio_irq_cfg[irq];
+		pr_err("%s: irq_cfg null",__func__);
+		return ret;
 	}
 
-	return MCI_PIN_IRQ_DISABLED;
+	if ((irq > SWIMCU_GPIO_NO_IRQ || irq < SWIMCU_NUM_GPIO_IRQ))
+	{
+		*irq_cfg = gpio_irq_cfg[irq];
+		ret = 0;
+	}
+
+	return ret;
 }
 
 /************
@@ -800,11 +819,11 @@ void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int 
 	{
 		/* Re-enable user-configured IRQ if the interrupt is handled successfully */
 		mutex_lock(&swimcu_gpio_cfg_mutex[gpio]);
-		swimcu_gpio_cfg[gpio].params.input.irqc_type = swimcu_gpio_irq_cfg[swimcu_irq];
+		swimcu_gpio_cfg[gpio].params.input.irqc_type = gpio_irq_cfg[swimcu_irq].type;
 		if (0 == _swimcu_gpio_set(swimcu, SWIMCU_GPIO_NOOP, gpio, 0, true))
 		{
 			pr_err("%s: Re-enabled irq %d type %X for MCU GPIO %d \n",
-				__func__, swimcu_irq, swimcu_gpio_irq_cfg[swimcu_irq], gpio);
+				__func__, swimcu_irq, gpio_irq_cfg[swimcu_irq].type, gpio);
 		}
 		mutex_unlock(&swimcu_gpio_cfg_mutex[gpio]);
 

@@ -65,6 +65,11 @@ struct swimcu_gpio {
 	struct platform_device *pdev;
 };
 
+struct swimcu_gpio_irq_cfg {
+	int type;
+	bool enabled;
+};
+
 /*
  * MCU GPIO map port/pin and irq to gpio index.
  */
@@ -90,9 +95,11 @@ int swimcu_gpio_set(struct swimcu *swimcu, int action, int gpio, int value);
 /* IRQ-related interface */
 int swimcu_gpio_irq_support_check(enum swimcu_gpio_index gpio);
 
-int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq, int type);
+int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq,
+		struct swimcu_gpio_irq_cfg *irq_cfg);
 
-int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq);
+int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq,
+		struct swimcu_gpio_irq_cfg *irq_cfg);
 
 void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int level);
 

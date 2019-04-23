@@ -229,14 +229,23 @@ static void swimcu_irq_sync_unlock(struct irq_data *data)
 	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
 	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
 	int gpio = swimcu_get_gpio_from_irq(swimcu_irq);
+	struct swimcu_gpio_irq_cfg irq_cfg;
 	enum mci_pin_irqc_type_e irq_type;
 	int result;
 
 	mutex_unlock(&swimcu->gpio_irq_lock);
 
 	/* Configure remote MCU GPIO with the latest IRQ type */
+	irq_cfg.enabled = false;
+	result = swimcu_gpio_irq_cfg_get(swimcu_irq, &irq_cfg);
+	if(result < 0)
+	{
+		pr_err("%s: failed to get irq_cfg for gpio%d, result=%d\n",
+			__func__,gpio, result);
+	}
 
-	irq_type = swimcu_gpio_irq_cfg_get(swimcu_irq);
+	irq_type = irq_cfg.enabled ? irq_cfg.type : MCI_PIN_IRQ_DISABLED;
+
 	result = swimcu_gpio_set(swimcu, SWIMCU_GPIO_SET_EDGE, gpio, irq_type);
 	if (result < 0)
 	{
@@ -252,19 +261,43 @@ static void swimcu_irq_disable(struct irq_data *data)
 {
 	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
 	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
+	struct swimcu_gpio_irq_cfg irq_cfg;
+	int result;
 
 	/* Set IRQ type as DISABLED. The actual action is delayed in
 	*  swimcu_irq_sync_unlock() for executing in the correct context.
 	*/
-	(void)swimcu_gpio_irq_cfg_set(swimcu_irq, MCI_PIN_IRQ_DISABLED);
-
-	swimcu_log(GPIO, "%s: disable irq%d\n", __func__, swimcu_irq);
+	result = swimcu_gpio_irq_cfg_get(swimcu_irq, &irq_cfg);
+	if(!result)
+	{
+		irq_cfg.enabled = false;
+		(void)swimcu_gpio_irq_cfg_set(swimcu_irq, &irq_cfg);
+		swimcu_log(GPIO, "%s: disable irq%d\n", __func__, swimcu_irq);
+	}
+	else
+	{
+		pr_err("%s: failed to get cfg for irq:%d",__func__,swimcu_irq);
+	}
 }
 
 static void swimcu_irq_enable(struct irq_data *data)
 {
-	swimcu_log(GPIO, "%s: delay the action for correct context\n", __func__);
+	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
+	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
+	struct swimcu_gpio_irq_cfg irq_cfg;
+	int result;
 
+	result = swimcu_gpio_irq_cfg_get(swimcu_irq, &irq_cfg);
+	if(!result)
+	{
+		irq_cfg.enabled = true;
+		(void)swimcu_gpio_irq_cfg_set(swimcu_irq, &irq_cfg);
+		swimcu_log(GPIO, "%s: enable irq%d\n", __func__, swimcu_irq);
+	}
+	else
+	{
+		pr_err("%s: failed to get cfg for irq:%d",__func__,swimcu_irq);
+	}
 }
 
 static int swimcu_irq_set_type(struct irq_data *data, unsigned int type)
@@ -272,7 +305,7 @@ static int swimcu_irq_set_type(struct irq_data *data, unsigned int type)
 	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
 	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
 	int gpio = swimcu_get_gpio_from_irq(swimcu_irq);
-	enum mci_pin_irqc_type_e irq_type;
+	struct swimcu_gpio_irq_cfg irq_cfg;
 	int err;
 
 	err = swimcu_gpio_irq_support_check(gpio);
@@ -281,30 +314,36 @@ static int swimcu_irq_set_type(struct irq_data *data, unsigned int type)
 		return err;
 	}
 
+	err = swimcu_gpio_irq_cfg_get(swimcu_irq, &irq_cfg);
+	if (err < 0)
+	{
+		return err;
+	}
+
 	/* map from SYS IRQ to SWIMCU IRQ type */
 	switch (type)
 	{
 		case IRQ_TYPE_LEVEL_LOW:
-			irq_type = MCI_PIN_IRQ_LOGIC_ZERO;
+			irq_cfg.type = MCI_PIN_IRQ_LOGIC_ZERO;
 			break;
 		case IRQ_TYPE_LEVEL_HIGH:
-			irq_type = MCI_PIN_IRQ_LOGIC_ONE;
+			irq_cfg.type = MCI_PIN_IRQ_LOGIC_ONE;
 			break;
 		case IRQ_TYPE_EDGE_BOTH:
-			irq_type = MCI_PIN_IRQ_EITHER_EDGE;
+			irq_cfg.type = MCI_PIN_IRQ_EITHER_EDGE;
 			break;
 		case IRQ_TYPE_EDGE_RISING:
-			irq_type = MCI_PIN_IRQ_RISING_EDGE;
+			irq_cfg.type = MCI_PIN_IRQ_RISING_EDGE;
 			break;
 		case IRQ_TYPE_EDGE_FALLING:
-			irq_type = MCI_PIN_IRQ_FALLING_EDGE;
+			irq_cfg.type = MCI_PIN_IRQ_FALLING_EDGE;
 			break;
 		default:
-			irq_type = MCI_PIN_IRQ_DISABLED;
+			irq_cfg.type = MCI_PIN_IRQ_DISABLED;
 	}
 
 	/* Save the IRQ type, to be enabled in swimcu_irq_sync_unlock() */
-	return swimcu_gpio_irq_cfg_set(swimcu_irq, (int)irq_type);
+	return swimcu_gpio_irq_cfg_set(swimcu_irq, &irq_cfg);
 }
 
 static struct irq_chip swimcu_irq_chip = {
