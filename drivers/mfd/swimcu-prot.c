@@ -36,6 +36,9 @@
 #define MCI_PROTOCOL_PING_RESP_PARAMS_OPT           3
 #define MCI_PROTOCOL_PING_RESP_PARAMS_COUNT         4
 
+#define MCI_PROTOCOL_COMMAND_MAX_RETRY              10
+#define MCI_PROTOCOL_COMMAND_RETRY_DELAY_MS         500
+
 /**************
  * Local data *
  **************/
@@ -589,6 +592,7 @@ enum mci_protocol_status_code_e mci_protocol_command(
 	struct mci_protocol_packet_s packet;
 	uint32_t results[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
 	int    i;
+	int command_retry = 0;
 
 	if (swimcu == NULL) {
 		return MCI_PROTOCOL_STATUS_CODE_FAIL;
@@ -596,118 +600,140 @@ enum mci_protocol_status_code_e mci_protocol_command(
 
 	mutex_lock(&swimcu->mcu_transaction_mutex);
 
-	packet.tag   = cmd;
-	packet.datap = params;
-	if (NULL == params || NULL == countp) {
-		packet.count = 0;
-	}
-	else {
-		packet.count = *countp;
-	}
-	packet.flags = flags;
+	do {
+		swimcu_log(PROT, "MCU command 0x%02X\n", cmd);
 
-	frame.payloadp = (void*) &packet;
-	frame.payload_len = MCI_PROTOCOL_PACKET_HEADER_LEN + packet.count * sizeof(uint32_t);
-	frame.type = MCI_PROTOCOL_FRAME_TYPE_APPL_COMMAND;
+		packet.tag   = cmd;
+		packet.datap = params;
+		if (NULL == params || NULL == countp) {
+			packet.count = 0;
+		}
+		else {
+			packet.count = *countp;
+		}
+		packet.flags = flags;
 
-	s_code = mci_protocol_frame_send(swimcu, &frame);
-	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code) {
-		pr_err("Failed to send request %.2x (%d)\n", cmd, s_code);
-		goto exit;
-	}
+		frame.payloadp = (void*) &packet;
+		frame.payload_len = MCI_PROTOCOL_PACKET_HEADER_LEN + packet.count * sizeof(uint32_t);
+		frame.type = MCI_PROTOCOL_FRAME_TYPE_APPL_COMMAND;
 
-	/* Receive next frame ACK/NAK */
-	frame.type = MCI_PROTOCOL_FRAME_TYPE_INVALID;
-	s_code = mci_protocol_frame_recv(swimcu, &frame);
-	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code) {
-		pr_err("Failed to receive a frame %d\n", s_code);
-		goto exit;
-	}
-
-	/* Check the received frame type */
-	if (frame.type != MCI_PROTOCOL_FRAME_TYPE_APPL_ACK) {
-		pr_err("Received unexpected frame type %.2x (%.2x)",
-			frame.type, MCI_PROTOCOL_FRAME_TYPE_APPL_ACK);
-		s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
-		goto exit;
-	}
-
-	/* Initialize the frame buffer before receiving */
-	for (i = 0; i < MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX; i++) {
-		results[i] = 0;
-	}
-	packet.datap = results;
-	packet.count = MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX;
-	frame.type = MCI_PROTOCOL_FRAME_TYPE_INVALID;
-
-	/* Receive response to the COMMAND */
-	s_code = mci_protocol_frame_recv(swimcu, &frame);
-	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code) {
-		/* NAK the response */
-		frame.type = MCI_PROTOCOL_FRAME_TYPE_APPL_NAK;
-		(void)mci_protocol_frame_send(swimcu, &frame);
-
-		pr_err("Failed to recv response\n");
-		s_code = MCI_PROTOCOL_STATUS_CODE_RX_ERROR;
-		goto exit;
-	}
-
-	/* ACK the response */
-	frame.type = MCI_PROTOCOL_FRAME_TYPE_APPL_ACK;
-
-	s_code = mci_protocol_frame_send(swimcu, &frame);
-	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
-		pr_err("Failed to send ACK %d\n", s_code);
-		goto exit;
-	}
-
-	if (packet.tag != MCI_PROTOCOL_COMMAND_TAG_GENERIC_RESP) {
-		pr_err("Unexpected response tag = 0x%x (0x%x)",
-		packet.tag, MCI_PROTOCOL_COMMAND_TAG_GENERIC_RESP);
-		s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
-		goto exit;
-	}
-
-	/* GENERIC RESP has always two parameters: status and corresponding cmd
-	 * Expand the protocol to allow other parameters from application command
-	 */
-	if (packet.count < MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN) {
-		pr_err("Unexpected number of parameters = %d (%d)",
-		packet.count, MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN);
-		s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
-		goto exit;
-	}
-
-	/* Verify the second parameter matches the command */
-	if (cmd != ((enum mci_protocol_command_tag_e) results[1])) {
-		pr_err("Incorrect response type to cmd %.2x (%.2x)", results[1], cmd);
-		s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
-		goto exit;
-	}
-
-	/* extract the status from the first parameter */
-	s_code = (enum mci_protocol_status_code_e) results[0];
-
-	/* extract returned results if there is any */
-	if (packet.count > MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN) {
-		/* check user provided buffer */
-		if (!params || !countp) {
-			swimcu_log(PROT, "command %.2x return count %d, discard", packet.tag, packet.count);
-			goto exit;
+		s_code = mci_protocol_frame_send(swimcu, &frame);
+		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code) {
+			pr_err("Failed to send request %.2x (%d)\n", cmd, s_code);
+			goto retry;
 		}
 
-		/* copy the results */
-		packet.count -= MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN;
-		for (i = 0; i < packet.count; i++) {
-			params[i] = results[i + MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN];
+		/* Receive next frame ACK/NAK */
+		frame.type = MCI_PROTOCOL_FRAME_TYPE_INVALID;
+		s_code = mci_protocol_frame_recv(swimcu, &frame);
+		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code) {
+			pr_err("Failed to receive a frame %d\n", s_code);
+			goto retry;
 		}
-		*countp = packet.count;
-	}
-	else {
-		*countp = 0;
-	}
 
-exit:
+		/* Check the received frame type */
+		if (frame.type != MCI_PROTOCOL_FRAME_TYPE_APPL_ACK) {
+			pr_err("Received unexpected frame type %.2x (%.2x)",
+				frame.type, MCI_PROTOCOL_FRAME_TYPE_APPL_ACK);
+			s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
+			goto retry;
+		}
+
+		/* Initialize the frame buffer before receiving */
+		for (i = 0; i < MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX; i++) {
+			results[i] = 0;
+		}
+		packet.datap = results;
+		packet.count = MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX;
+		frame.type = MCI_PROTOCOL_FRAME_TYPE_INVALID;
+
+		/* Receive response to the COMMAND */
+		s_code = mci_protocol_frame_recv(swimcu, &frame);
+		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code) {
+			/* NAK the response */
+			frame.type = MCI_PROTOCOL_FRAME_TYPE_APPL_NAK;
+			(void)mci_protocol_frame_send(swimcu, &frame);
+
+			pr_err("Failed to recv response\n");
+			s_code = MCI_PROTOCOL_STATUS_CODE_RX_ERROR;
+			goto retry;
+		}
+
+		/* ACK the response */
+		frame.type = MCI_PROTOCOL_FRAME_TYPE_APPL_ACK;
+
+		s_code = mci_protocol_frame_send(swimcu, &frame);
+		if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
+			pr_err("Failed to send ACK %d\n", s_code);
+			goto retry;
+		}
+
+		if (packet.tag != MCI_PROTOCOL_COMMAND_TAG_GENERIC_RESP) {
+			pr_err("Unexpected response tag = 0x%x (0x%x)",
+			packet.tag, MCI_PROTOCOL_COMMAND_TAG_GENERIC_RESP);
+			s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
+			goto retry;
+		}
+
+		/* GENERIC RESP has always two parameters: status and corresponding cmd
+		 * Expand the protocol to allow other parameters from application command
+		 */
+		if (packet.count < MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN) {
+			pr_err("Unexpected number of parameters = %d (%d)",
+			packet.count, MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN);
+			s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
+			goto retry;
+		}
+
+		/* Verify the second parameter matches the command */
+		if (cmd != ((enum mci_protocol_command_tag_e) results[1])) {
+			pr_err("Incorrect response type to cmd %.2x (%.2x)", results[1], cmd);
+			s_code = MCI_PROTOCOL_STATUS_CODE_FAIL;
+			goto retry;
+		}
+
+		/* extract the status from the first parameter */
+		s_code = (enum mci_protocol_status_code_e) results[0];
+
+		/* extract returned results if there is any */
+		if (packet.count > MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN) {
+			/* check user provided buffer */
+			if (!params || !countp) {
+				swimcu_log(PROT, "command %.2x return count %d, discard", packet.tag, packet.count);
+				goto retry;
+			}
+
+			/* copy the results */
+			packet.count -= MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN;
+			for (i = 0; i < packet.count; i++) {
+				params[i] = results[i + MCI_PROTOCOL_GENERIC_RESP_RESULT_COUNT_MIN];
+			}
+			*countp = packet.count;
+		}
+		else {
+			*countp = 0;
+		}
+
+retry:
+		if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
+			break; /* out of the while loop without retry */
+		}
+
+		/* If the MCI Protocol Command is not sent successfully, we do the recovery mechanism to re-send again */
+		command_retry++;
+		pr_err("MCU Protocol Command 0x%02X failed, retry=%d\n", cmd, command_retry);
+		if (command_retry > MCI_PROTOCOL_COMMAND_MAX_RETRY) {
+			break;
+		}
+
+		/* Attempt first retry immediately, for subsequent retries wait to allow
+		 * MCU I2C slave to recover */
+		if (command_retry > 1) {
+			msleep(MCI_PROTOCOL_COMMAND_RETRY_DELAY_MS);
+		}
+	}
+	while (true);
+
 	mutex_unlock(&swimcu->mcu_transaction_mutex);
 
 	return s_code;
