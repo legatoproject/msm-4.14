@@ -1624,6 +1624,25 @@ static int swimcu_pm_wusrc_config(
 				}
 				statep->recovery_irqs[wi] = irq & 0xFF;
 
+				/* Force enable the pull up resistor on the GPIO.
+				 *
+				 * Because of the hardware design of the FX30, the pull up
+				 * resistor must be enabled on this GPIO for the device to
+				 * wake from low power mode. Without the pull up enabled, the
+				 * GPIO will never detect a state change and the device will
+				 * never wake up.
+				 * If the GPIO has been exported to the sysfs, the pull
+				 * resistor is probably already configured properly. This acts
+				 * as extra insurance to make sure the pull up resistor is set.
+				 */
+				err_code = swimcu_gpio_set(swimcup, SWIMCU_GPIO_SET_PULL, gpio, SWIMCU_GPIO_PULL_UP);
+				if (err_code < 0)
+				{
+					pr_err("%s: failed to set pull up resistor for gpio %d (err=%d)\n",
+						__func__, gpio, err_code);
+					return err_code;
+				}
+
 				/* set specific IRQ type configured by user */
 				err_code = swimcu_gpio_set(swimcup, SWIMCU_GPIO_SET_EDGE, gpio, wrsrc_irq);
 				if (err_code < 0)
@@ -2198,6 +2217,26 @@ static ssize_t pm_gpio_edge_attr_store(struct kobject *kobj,
 	}
 
 	swimcup = container_of(kobj->parent, struct swimcu, pm_boot_source_kobj);
+
+	/* Force enable the pull up resistor on the GPIO.
+	 *
+	 * Because of the hardware design of the FX30, the pull up
+	 * resistor must be enabled on this GPIO for the device to
+	 * wake from low power mode. Without the pull up enabled, the
+	 * GPIO will never detect a state change and the device will
+	 * never wake up.
+	 * If the GPIO has been exported to the sysfs, the pull
+	 * resistor is probably already configured properly. This acts
+	 * as extra insurance to make sure the pull up resistor is set.
+	 */
+	ret = swimcu_gpio_set(swimcup,
+		SWIMCU_GPIO_SET_PULL, gpio, SWIMCU_GPIO_PULL_UP);
+	if (ret < 0)
+	{
+		pr_err("%s: failed to set pull up resistor for gpio %d (err=%d)\n", __func__, gpio, ret);
+		return ret;
+	}
+
 	ret = swimcu_gpio_set(swimcup,
 		SWIMCU_GPIO_SET_EDGE, gpio, swimcu_irq_type_name_map[ti].type);
 	if (ret < 0)

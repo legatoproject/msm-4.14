@@ -783,6 +783,20 @@ int swimcu_gpio_close( struct swimcu *swimcu, int gpio )
 		return -EINVAL;
 	}
 
+	/* Do not disable GPIO's 36 and 38
+	 *
+	 * We cannot disable GPIOs 36 and 38 because we need them working when
+	 * entering low power mode. A race condition exists where the MCU power
+	 * management driver configures the GPIOs to trigger wakeup properly, but
+	 * the MCU GPIO driver will disable the GPIO just before the MDM shuts
+	 * down. When the GPIO is disabled, the device will never wake from low
+	 * power mode.
+	 */
+	if (gpio == SWIMCU_GPIO_PTA0 || gpio == SWIMCU_GPIO_PTB0)
+	{
+		return 0;
+	}
+
 	swimcu_gpio_cfg[gpio].mux = MCI_MCU_PIN_FUNCTION_DISABLED;
 	return swimcu_gpio_set(swimcu, SWIMCU_GPIO_NOOP, gpio, 0);
 }
