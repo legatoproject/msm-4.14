@@ -808,8 +808,6 @@ void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int 
 	enum swimcu_gpio_index gpio = swimcu_get_gpio_from_port_pin(port, pin);
 	enum swimcu_gpio_irq_index swimcu_irq = swimcu_get_irq_from_gpio(gpio);
 
-	mutex_lock(&swimcu->gpio_irq_lock);
-
 	/* MCU disabled IRQ on its triggering */
 	swimcu_gpio_cfg[gpio].params.input.irqc_type = MCI_PIN_IRQ_DISABLED;
 	swimcu_gpio_cfg[gpio].level = level;
@@ -833,7 +831,5 @@ void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int 
 		/* Leave GPIO IRQ disabled until user re-configure the IRQ */
 		pr_err("%s: failed to handle IRQ event for gpio%d\n", __func__, gpio);
 	}
-
-	mutex_unlock(&swimcu->gpio_irq_lock);
 }
 

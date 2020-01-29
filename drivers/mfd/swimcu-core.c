@@ -471,7 +471,6 @@ static int swimcu_process_events(struct swimcu *swimcu)
 				/* MCU fault. MAX is arbitrary, but there's no known reason to exceed 1 */
 				pr_err("%s: query max exceeded, %d\n", __func__, query_count);
 				swimcu_set_fault_mask(SWIMCU_FAULT_EVENT_OFLOW);
-				return -EREMOTEIO;
 			}
 			/* else retrieve another block of events */
 		}
