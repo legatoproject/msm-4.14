@@ -169,6 +169,9 @@ struct swimcu {
 	struct mutex mcu_transaction_mutex;
 
 	struct mutex adc_mutex;
+
+	struct mutex pm_status_mutex;
+
 	int adc_init_mask;
 
 	int gpio_irq_base;

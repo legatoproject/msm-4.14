@@ -2346,14 +2346,25 @@ static ssize_t enable_store(struct kobject *kobj,
 		{
 			swimcup = container_of(kobj, struct swimcu, pm_boot_source_kobj);
 
-			swimcu_pm_enable = tmp_enable;
-			sysfs_notify(kobj, NULL, "enable");
+			mutex_lock(&swimcup->pm_status_mutex);
 
-			ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
-			if (0 == ret)
+			if (swimcu_pm_status == SWIMCU_PM_STATUS_ULPM_COMPLETED)
 			{
-				ret = count;
+				pr_err("%s: ULPM already complete. Returning early\n", __func__);
+				ret = -EINPROGRESS;
 			}
+			else
+			{
+				ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
+				if (0 == ret)
+				{
+					ret = count;
+					swimcu_pm_enable = tmp_enable;
+					sysfs_notify(kobj, NULL, "enable");
+				}
+			}
+
+			mutex_unlock(&swimcup->pm_status_mutex);
 		}
 	}
 
@@ -3040,16 +3051,27 @@ static ssize_t swimcu_psm_enable_attr_store(struct kobject *kobj,
 		}
 		else
 		{
-			swimcu_pm_enable = tmp_enable;
-			sysfs_notify(kobj, NULL, "enable");
-
 			swimcup = container_of(kobj, struct swimcu, pm_psm_kobj);
-			ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
-			if (0 == ret)
+
+			mutex_lock(&swimcup->pm_status_mutex);
+
+			if (swimcu_pm_status == SWIMCU_PM_STATUS_ULPM_COMPLETED)
 			{
-				ret = count;
+				pr_err("%s: ULPM already complete. Returning early\n", __func__);
+				ret = -EINPROGRESS;
+			}
+			else
+			{
+				ret = pm_set_mcu_ulpm_enable(swimcup, tmp_enable);
+				if (0 == ret)
+				{
+					ret = count;
+					swimcu_pm_enable = tmp_enable;
+					sysfs_notify(kobj, NULL, "enable");
+				}
 			}
 
+			mutex_unlock(&swimcup->pm_status_mutex);
 		}
 	}
 
@@ -3169,6 +3191,8 @@ static ssize_t swimcu_pm_status_attr_store(struct kobject *kobj,
 {
 	int value;
 	int ret = kstrtoint(buf, 0, &value);
+	struct swimcu *swimcup;
+
 	if (ret || value < SWIMCU_PM_STATUS_ULPM_FAILED ||
 			value > SWIMCU_PM_STATUS_ULPM_COMPLETED)
 	{
@@ -3176,13 +3200,25 @@ static ssize_t swimcu_pm_status_attr_store(struct kobject *kobj,
 		pr_err("%s: invalid input %s (%i~%i)\n", __func__, buf,
 			SWIMCU_PM_STATUS_ULPM_FAILED, SWIMCU_PM_STATUS_ULPM_COMPLETED);
 	} else {
-		if (swimcu_pm_status != value)
+		swimcup = container_of(kobj, struct swimcu, pm_psm_kobj);
+
+		mutex_lock(&swimcup->pm_status_mutex);
+
+		if (swimcu_pm_status == SWIMCU_PM_STATUS_ULPM_COMPLETED)
+		{
+			pr_err("%s: ULPM already complete. Returning early\n", __func__);
+			ret = -EINVAL;
+		}
+		else if (swimcu_pm_status != value)
 		{
 			swimcu_pm_status = value;
 			sysfs_notify(kobj, NULL, "status");
+			ret = count;
 		}
-		ret = count;
+
+		mutex_unlock(&swimcup->pm_status_mutex);
 	}
+
 	return ret;
 }
 

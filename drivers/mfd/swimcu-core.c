@@ -700,8 +700,9 @@ int swimcu_device_init(struct swimcu *swimcu)
 
 	swimcu_log(INIT, "%s: start 0x%x\n", __func__, swimcu->driver_init_mask);
 
-	/* always initializa PSM interface once and only once */
+	/* always initialize PSM interface once and only once */
 	if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_PSM)) {
+		mutex_init(&swimcu->pm_status_mutex);
 		swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_PSM;
 		ret = swimcu_pm_sysfs_init(swimcu, SWIMCU_FUNC_FLAG_PSM);
 		if (ret != 0) {
