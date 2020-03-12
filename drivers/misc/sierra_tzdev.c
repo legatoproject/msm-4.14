@@ -719,7 +719,7 @@ static long sierra_tzdev_ioctl(struct file *file, unsigned cmd, unsigned long ar
 
         rc = tzdev_storage_service_generate_key(krn->enckey, &output_len);
 
-        pr_info("%s()_line%d:TZDEV_IOCTL_KEYGEN_REQ, get key_size:%d, rc=%d\n",
+        pr_debug("%s()_line%d:TZDEV_IOCTL_KEYGEN_REQ, get key_size:%d, rc=%d\n",
                  __func__, __LINE__, output_len, rc);
 
         if (rc != 0)
@@ -776,7 +776,7 @@ static long sierra_tzdev_ioctl(struct file *file, unsigned cmd, unsigned long ar
                                           krn->encrypted_buffer, &output_len,
                                           krn->enckey, krn->encklen);
 
-        pr_info("%s()_line%d: TZDEV_IOCTL_SEAL_REQ: plain_data_len:%d, seal_data_len:%d, rc=%d\n",
+        pr_debug("%s()_line%d: TZDEV_IOCTL_SEAL_REQ: plain_data_len:%d, seal_data_len:%d, rc=%d\n",
                 __func__, __LINE__, krn->plain_dlen, output_len, rc);
 
         if (rc != 0)
@@ -819,7 +819,7 @@ static long sierra_tzdev_ioctl(struct file *file, unsigned cmd, unsigned long ar
         rc = tzdev_unseal_data_using_aesccm(krn->encrypted_buffer, krn->encrypted_len,
                                             krn->plain_data, &output_len,
                                             krn->enckey, krn->encklen);
-        pr_info("%s()_line%d: TZDEV_IOCTL_UNSEAL_REQ: sealed data len:%d, plain_data_len:%d, rc=%d\n",
+        pr_debug("%s()_line%d: TZDEV_IOCTL_UNSEAL_REQ: sealed data len:%d, plain_data_len:%d, rc=%d\n",
                  __func__, __LINE__, krn->encrypted_len, output_len, rc);
 
         if (rc != 0)
@@ -851,14 +851,14 @@ out:
 static int sierra_tzdev_open(struct inode *inode, struct file *file)
 {
   sierra_tzdev_open_times++;
-  pr_info("%s()_%d: sierra_tzdev_open_times=%d \n", __func__,__LINE__,sierra_tzdev_open_times);
+  pr_debug("%s()_%d: sierra_tzdev_open_times=%d \n", __func__,__LINE__,sierra_tzdev_open_times);
   return 0;
 }
 
 static int sierra_tzdev_release(struct inode *inode, struct file *file)
 {
   sierra_tzdev_open_times--;
-  pr_info("%s()_%d: tzdev_driver_open_times=%d \n", __func__,__LINE__,sierra_tzdev_open_times);
+  pr_debug("%s()_%d: tzdev_driver_open_times=%d \n", __func__,__LINE__,sierra_tzdev_open_times);
   if(sierra_tzdev_open_times < 0)
   {
     return ENODEV;
