@@ -1,0 +1,85 @@
+/*
+ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/ {
+	model = "Sierra Wireless, Inc. MDM WP7xxx series MangOH Green";
+	compatible = "qcom,mdm9607-mtp", "qcom,mdm9607", "qcom,mtp";
+	qcom,board-id = <8 0x83>;
+};
+
+&i2c_4 {
+        ioexp-mux@71 {
+                // IO expanders are below the I2C switch PCA9548
+                compatible = "nxp,pca9548";
+                reg = <0x71>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                i2c@4 {
+                        // IO expander 1: channel 4
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        reg = <4>;
+                        ioexp1_gpios: io_exp@3e {
+                                #gpio-cells = <2>;
+                                gpio-controller;
+                                compatible = "sx1509q";
+                                reg = <0x3e>;
+                                sx150x,pullup_ena = <0x0>;
+                                sx150x,pulldn_ena = <0x0>;
+                                sx150x,float_ena = <0x0>;
+                                sx150x,polarity = <0x0>;
+                                label = "ioexp1-gpio";
+                                sx150x,gpio_base = <300>;
+                        };
+                };
+                i2c@5 {
+                        // IO expander 1: channel 5
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        reg = <5>;
+                        ioexp2_gpios: io_exp@3f {
+                                #gpio-cells = <2>;
+                                gpio-controller;
+                                compatible = "sx1509q";
+                                reg = <0x3f>;
+                                /* Set pullup for GPIO 11, 12, 13 to select card inserted */
+                                sx150x,pullup_ena = <0x3800>;
+                                sx150x,pulldn_ena = <0x0>;
+                                sx150x,float_ena = <0x0>;
+                                sx150x,polarity = <0x0>;
+                                label = "ioexp2-gpio";
+                                sx150x,gpio_base = <320>;
+                        };
+                };
+                i2c@6 {
+                        // IO expander 3: channel 6
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        reg = <6>;
+                        ioexp3_gpios: io_exp@70 {
+                                #gpio-cells = <2>;
+                                gpio-controller;
+                                compatible = "sx1509q";
+                                reg = <0x70>;
+                                sx150x,pullup_ena = <0x0>;
+                                sx150x,pulldn_ena = <0x0>;
+                                sx150x,float_ena = <0x0>;
+                                sx150x,polarity = <0x0>;
+                                label = "ioexp3-gpio";
+                                sx150x,gpio_base = <340>;
+                        };
+                };
+        };
+};
+

@@ -402,6 +402,14 @@ dtb-$(CONFIG_ARCH_SDXPRAIRIE) += sdxprairie-rumi.dtb \
 dtb-$(CONFIG_ARCH_MDM9607) += mdm9607-cdp.dtb \
         mdm9607-mtp.dtb \
 	mdm9607-rcm.dtb \
+	mdm9607-wp76xx-default.dtb \
+	mdm9206-wp77xx-default.dtb \
+	mdm9607-wp76xx-mangoh-green.dtb \
+	mdm9206-wp77xx-mangoh-green.dtb \
+	mdm9607-wp76xx-mangoh-red.dtb \
+	mdm9206-wp77xx-mangoh-red.dtb \
+	mdm9607-wp76xx-mangoh-yellow.dtb \
+	mdm9206-wp77xx-mangoh-yellow.dtb \
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 	dtbo-$(CONFIG_ARCH_SDM660) += \

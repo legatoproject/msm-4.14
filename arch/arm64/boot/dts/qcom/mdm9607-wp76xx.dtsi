@@ -1,0 +1,130 @@
+/*
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+/*Inherit the shared DTS and overlay the difference */
+#include "mdm9607-swi.dtsi"
+#include "mdm9607-pinctrl.dtsi"
+
+&soc {
+	 tlmm_pinmux: pinctrl@1000000 {
+		/*undefine use of qcom,tlmm-emmc-boot-select*/
+		qcom,tlmm-emmc-boot-select;
+
+		uart1_console_sleep: uart1_console_sleep {
+			mux {
+				pins = "gpio12", "gpio13";
+				function = "blsp_uart1";
+			};
+			config {
+				pins = "gpio12", "gpio13";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+
+		blsp1_uart1_active: blsp1_uart1_active {
+			mux {
+				pins = "gpio12", "gpio13", "gpio14", "gpio15";
+				function = "blsp_uart1";
+			};
+
+			config {
+				pins = "gpio12", "gpio13", "gpio14", "gpio15";
+				drive-strength = <2>;
+				bias-disable;
+			};
+		};
+
+		blsp1_uart1_sleep: blsp1_uart1_sleep {
+			mux {
+				pins = "gpio12", "gpio13", "gpio14", "gpio15";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio12", "gpio13", "gpio14", "gpio15";
+				drive-strength = <2>;
+				bias-disable;
+			};
+		};
+
+		blsp1_uart2_active: blsp1_uart2_active {
+			mux {
+				pins = "gpio4", "gpio5", "gpio6", "gpio7";
+				function = "blsp_uart2";
+			};
+
+			config {
+				pins = "gpio4", "gpio5", "gpio6", "gpio7";
+				drive-strength = <2>;
+				bias-disable;
+			};
+		};
+
+		blsp1_uart2_sleep: blsp1_uart2_sleep {
+			mux {
+				pins = "gpio4", "gpio5", "gpio6", "gpio7";
+				function = "gpio";
+			};
+
+
+			config {
+				pins = "gpio4", "gpio5", "gpio6", "gpio7";
+				drive-strength = <2>;
+				bias-disable;
+			};
+		};
+	};
+};
+
+&blsp1_uart1_ls {
+	status = "ok";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_console_sleep>;
+};
+
+&blsp1_uart2_hs {
+	status = "ok";
+};
+
+&qnand_1 {
+	status = "ok";
+};
+
+&i2c_4 {
+	/* SMB358 charger configuration */
+	smb358_otg_supply: smb358-charger@57 {
+		status = "disabled";
+	};
+};
+
+&pm8019_gpios {
+	/* PMIC GPIO 3 for rome_vreg */
+	rome_vreg {
+		rome_vreg_default: rome_vreg_default {
+			status = "disabled";
+		};
+	};
+
+	/* sdcard_ext_vreg GPIO 4 */
+	sdcard_vreg {
+		sdcard_vreg_default: sdcard_vreg_default {
+			status = "disabled";
+		};
+	};
+
+	emac_vreg {
+		emac_vreg_default: emac_vreg_default { /* MPP 4 for emac_vreg*/
+			status = "disabled";
+		};
+	};
+};
