@@ -6896,7 +6896,7 @@ unsigned long free_reserved_area(void *start, void *end, int poison, char *s)
 			s, pages << (PAGE_SHIFT - 10));
 
 #ifdef CONFIG_HAVE_MEMBLOCK
-		memblock_dbg("memblock_free: [%#016llx-%#016llx] %pF\n",
+		memblock_dbg("memblock_free: [%#016x-%#016x] %pF\n",
 			__pa(start), __pa(end), (void *)_RET_IP_);
 #endif
 

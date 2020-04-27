@@ -577,7 +577,7 @@ static void gsi_process_evt_re(struct gsi_evt_ctx *ctx,
 {
 	struct gsi_xfer_compl_evt *evt;
 
-	evt = (struct gsi_xfer_compl_evt *)(ctx->ring.base_va +
+	evt = (struct gsi_xfer_compl_evt *)(unsigned long)(ctx->ring.base_va +
 			ctx->ring.rp_local - ctx->ring.base);
 	gsi_process_chan(evt, notify, callback);
 	gsi_incr_ring_rp(&ctx->ring);

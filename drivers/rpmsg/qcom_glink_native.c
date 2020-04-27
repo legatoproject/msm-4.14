@@ -767,7 +767,7 @@ static int qcom_glink_advertise_intent(struct qcom_glink *glink,
 	cmd.size = cpu_to_le32(intent->size);
 	cmd.liid = cpu_to_le32(intent->id);
 
-	CH_INFO(channel, "count:%d size:%lu liid:%d\n", 1,
+	CH_INFO(channel, "count:%d size:%u liid:%d\n", 1,
 		intent->size, intent->id);
 
 	qcom_glink_tx(glink, &cmd, sizeof(cmd), NULL, 0, true);
@@ -1089,7 +1089,7 @@ static void qcom_glink_handle_intent(struct qcom_glink *glink,
 		intent->id = le32_to_cpu(msg->intents[i].iid);
 		intent->size = le32_to_cpu(msg->intents[i].size);
 
-		CH_INFO(channel, "riid:%d size:%lu\n", intent->id,
+		CH_INFO(channel, "riid:%d size:%u\n", intent->id,
 				intent->size);
 
 		spin_lock_irqsave(&channel->intent_lock, flags);
@@ -1452,7 +1452,7 @@ static int qcom_glink_request_intent(struct qcom_glink *glink,
 	cmd.cid = channel->lcid;
 	cmd.size = size;
 
-	CH_INFO(channel, "size:%lu\n", size);
+	CH_INFO(channel, "size:%u\n", size);
 
 	ret = qcom_glink_tx(glink, &cmd, sizeof(cmd), NULL, 0, true);
 	if (ret)
