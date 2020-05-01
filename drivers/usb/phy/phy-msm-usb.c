@@ -4412,6 +4412,8 @@ static int msm_otg_probe(struct platform_device *pdev)
 	phy->set_power = msm_otg_set_power;
 	phy->set_suspend = msm_otg_set_suspend;
 	phy->dbg_event = msm_otg_dbg_log_event;
+	phy->vbus_nb.notifier_call = msm_otg_vbus_notifier;
+	phy->id_nb.notifier_call = msm_otg_id_notifier;
 
 	phy->io_ops = &msm_otg_io_ops;
 
