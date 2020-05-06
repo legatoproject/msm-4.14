@@ -296,6 +296,8 @@ static long smd_pkt_ioctl(struct file *file, unsigned int cmd,
 	case TIOCMBIC:
 		ret = smd_pkt_tiocmset(smd_pkt_devp, cmd, arg);
 		break;
+	case TCGETS:
+	case TCSETSF:
 	case SMD_PKT_IOCTL_QUEUE_RX_INTENT:
 		/* Return success to not break userspace client logic */
 		ret = 0;
