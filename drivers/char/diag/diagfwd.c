@@ -473,7 +473,8 @@ void diag_update_pkt_buffer(unsigned char *buf, uint32_t len, int type)
 	}
 
 	mutex_lock(&driver->diagchar_mutex);
-	if (CHK_OVERFLOW(ptr, ptr, ptr + max_len, len)) {
+	/* Compiler complains that comparison always evaluates to true, so cheat it. */
+	if (CHK_OVERFLOW(ptr+0, ptr, ptr + max_len, len)) {
 		memcpy(ptr, temp, len);
 		*length = len;
 		*in_busy = 1;
