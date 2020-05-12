@@ -12,10 +12,29 @@
  */
 #include "mdm9607.dtsi"
 
+/ {
+        reserved-memory {
+                #address-cells = <1>;
+                #size-cells = <1>;
+                ranges;
+
+                sierra_ssmem_region: sierra_region@0x8ff00000 {
+                        compatible = "removed-dma-pool";
+                        no-map;
+                        reg = <0x8ff00000 0x100000>;
+                };
+        };
+};
+
 &soc {
         #address-cells = <1>;
         #size-cells = <1>;
         ranges;
+
+	sierra_ssmem@0x8ff00000 { /* Sierra SSMEM */
+		compatible = "sierra,ssmem";
+		memory-region = <&sierra_ssmem_region>;
+	};
 
         blsp1_uart1_ls: serial@78af000 { /* BLSP1 UART1, SWI:UART2, low speed*/
                 compatible = "qcom,msm-uartdm-v1.4","qcom,msm-uartdm";

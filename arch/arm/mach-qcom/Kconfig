@@ -228,4 +228,23 @@ config ARCH_MDM9607
 	select HAVE_CLK_PREPARE
 
 endmenu
+
+# SWISTART
+config SIERRA
+        bool "Activates/Deactivates Sierra Wireless changes"
+        help
+          All Sierra Wireless changes are controlled by this define
+        default y
+
+config SIERRA_SSMEM
+        bool "Enable Sierra Wireless Shared Memory"
+        depends on SIERRA
+        help
+          If this feature is enabled, various hardware and software subsystems
+          could share data (e.g. GPIO ownership, key exchange, etc.). If not
+          selected, some of the Sierra Wireless system features may not work.
+
+          If unsure, select 'y'.
+#SWISTOP
+
 endif
