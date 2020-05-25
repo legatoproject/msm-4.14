@@ -200,6 +200,9 @@ struct gpio_desc {
 #define FLAG_OPEN_DRAIN	7	/* Gpio is open drain type */
 #define FLAG_OPEN_SOURCE 8	/* Gpio is open source type */
 #define FLAG_USED_AS_IRQ 9	/* GPIO is connected to an IRQ */
+#ifdef CONFIG_SIERRA
+#define FLAG_IS_UP	10	/* GPIO pull type */
+#endif
 #define FLAG_IS_HOGGED	11	/* GPIO is hogged */
 #define FLAG_SLEEP_MAY_LOOSE_VALUE 12	/* GPIO may loose value in sleep */
 

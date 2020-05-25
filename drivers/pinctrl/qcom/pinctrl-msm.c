@@ -540,6 +540,55 @@ static int msm_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 	return val & BIT(g->oe_bit) ? 0 : 1;
 }
 
+#ifdef CONFIG_SIERRA
+static int msm_gpio_pull_down(struct gpio_chip *chip, unsigned offset)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
+	unsigned long flags;
+	void __iomem *base;
+	u32 val;
+
+	g = &pctrl->soc->groups[offset];
+	base = reassign_pctrl_reg(pctrl->soc, offset);
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	val = readl(base + g->ctl_reg);
+	val &= ~MSM_GPIO_PULL_MASK;
+	val |=  MSM_GPIO_PULL_DOWN;
+	writel(val, base + g->ctl_reg);
+
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	return 0;
+}
+
+static int msm_gpio_pull_up(struct gpio_chip *chip, unsigned offset)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
+	unsigned long flags;
+	void __iomem *base;
+	u32 val;
+
+	g = &pctrl->soc->groups[offset];
+	base = reassign_pctrl_reg(pctrl->soc, offset);
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	val = readl(base + g->ctl_reg);
+	val &= ~MSM_GPIO_PULL_MASK;
+	val |=  MSM_GPIO_PULL_UP;
+	writel(val, base + g->ctl_reg);
+
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	return 0;
+}
+
+#endif
+
 static int msm_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
 	const struct msm_pingroup *g;
@@ -635,6 +684,10 @@ static const struct gpio_chip msm_gpio_template = {
 	.direction_input  = msm_gpio_direction_input,
 	.direction_output = msm_gpio_direction_output,
 	.get_direction    = msm_gpio_get_direction,
+	#ifdef CONFIG_SIERRA
+	.pull_up          = msm_gpio_pull_up,
+	.pull_down        = msm_gpio_pull_down,
+	#endif
 	.get              = msm_gpio_get,
 	.set              = msm_gpio_set,
 	.request          = gpiochip_generic_request,

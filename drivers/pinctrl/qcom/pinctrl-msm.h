@@ -16,6 +16,12 @@
 
 struct pinctrl_pin_desc;
 
+#ifdef CONFIG_SIERRA
+#define MSM_GPIO_PULL_DOWN		0x1
+#define MSM_GPIO_PULL_UP		0x3
+#define MSM_GPIO_PULL_MASK		0x3
+#endif
+
 /**
  * struct msm_function - a pinmux function
  * @name:    Name of the pinmux function.

@@ -98,6 +98,11 @@ int gpiod_direction_input(struct gpio_desc *desc);
 int gpiod_direction_output(struct gpio_desc *desc, int value);
 int gpiod_direction_output_raw(struct gpio_desc *desc, int value);
 
+#ifdef CONFIG_SIERRA
+int gpio_pull_up(struct gpio_desc *desc);
+int gpio_pull_down(struct gpio_desc *desc);
+#endif
+
 /* Value get/set from non-sleeping context */
 int gpiod_get_value(const struct gpio_desc *desc);
 void gpiod_set_value(struct gpio_desc *desc, int value);
@@ -292,6 +297,23 @@ static inline int gpiod_direction_output(struct gpio_desc *desc, int value)
 	WARN_ON(1);
 	return -ENOSYS;
 }
+
+#ifdef CONFIG_SIERRA
+static inline int gpio_pull_up(struct gpio_desc *desc)
+{
+	/* GPIO can never have been requested */
+	WARN_ON(1);
+	return -ENOSYS;
+}
+
+static inline int gpio_pull_down(struct gpio_desc *desc)
+{
+	/* GPIO can never have been requested */
+	WARN_ON(1);
+	return -ENOSYS;
+}
+#endif
+
 static inline int gpiod_direction_output_raw(struct gpio_desc *desc, int value)
 {
 	/* GPIO can never have been requested */

@@ -125,6 +125,12 @@ struct gpio_chip {
 						unsigned offset);
 	int			(*direction_output)(struct gpio_chip *chip,
 						unsigned offset, int value);
+	#ifdef CONFIG_SIERRA
+	int			(*pull_up)(struct gpio_chip *chip,
+    						unsigned offset);
+	int			(*pull_down)(struct gpio_chip *chip,
+						unsigned offset);
+	#endif
 	int			(*get)(struct gpio_chip *chip,
 						unsigned offset);
 	void			(*set)(struct gpio_chip *chip,
