@@ -9,7 +9,9 @@ obj-$(CONFIG_ARCH_SDM660) += board-660.o
 
 # SWISTART
 obj-$(CONFIG_SIERRA_SSMEM) += sierra_smem.o sierra_smem_msg.o sierra_smem_errdump.o sierra_smem_mode.o
+obj-y += sierra_bscommon.o
 CFLAGS_sierra_smem_mode.o := -I$(src)
+CFLAGS_sierra_bscommon.o := -I$(src)
 
 obj-$(CONFIG_SIERRA) += sierra/
 # SWISTOP

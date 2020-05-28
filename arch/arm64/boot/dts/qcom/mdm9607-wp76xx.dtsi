@@ -19,6 +19,26 @@
 		/*undefine use of qcom,tlmm-emmc-boot-select*/
 		qcom,tlmm-emmc-boot-select;
 
+		gpio-bit-map =  <38 1>,
+				<30 3>,
+				<16 6>,
+				<58 7>,
+				<76 12>,
+				<8 20>,
+				<9 21>,
+				<10 22>,
+				<11 23>,
+				<51 24>,
+				<45 27>,
+				<46 28>,
+				<47 29>,
+				<48 30>,
+				<77 31>,
+				<78 32>,
+				<37 34>,
+				<79 41>;
+		gpio-RI = <25>;
+
 		uart1_console_sleep: uart1_console_sleep {
 			mux {
 				pins = "gpio12", "gpio13";
@@ -83,6 +103,42 @@
 				bias-disable;
 			};
 		};
+	};
+
+	sierra_gpio: sierra_gpio {
+		compatible = "sierra,gpio";
+		alias-2 = <&tlmm_pinmux 38 0>;
+		alias-4 = <&tlmm_pinmux 30 0>;
+		alias-6 = <&pm8019_gpios 5 0>;
+		alias-7 = <&tlmm_pinmux 16 0>;
+		alias-8 = <&tlmm_pinmux 58 0>;
+		alias-13 = <&tlmm_pinmux 76 0>;
+		alias-21 = <&tlmm_pinmux 8 0>;
+		alias-22 = <&tlmm_pinmux 9 0>;
+		alias-23 = <&tlmm_pinmux 10 0>;
+		alias-24 = <&tlmm_pinmux 11 0>;
+		alias-25 = <&tlmm_pinmux 51 0>;
+		alias-28 = <&tlmm_pinmux 45 0>;
+		alias-29 = <&tlmm_pinmux 46 0>;
+		alias-30 = <&tlmm_pinmux 47 0>;
+		alias-31 = <&tlmm_pinmux 48 0>;
+		alias-32 = <&tlmm_pinmux 77 0>;
+		alias-33 = <&tlmm_pinmux 78 0>;
+		alias-35 = <&tlmm_pinmux 37 0>;
+                /* Like SWIMCU pinctrl is not defined inside the device tree,
+                 * it requires to know the SWIMCU gpio base address: 200
+		 * see: SWIMCU_GPIO_BASE in arch/arm/mach-msm/include/mach/swimcu.h
+		 */
+		//alias-36 = <200 0>;
+		//alias-37 = <201 0>;
+		//alias-38 = <202 0>;
+		//alias-40 = <203 0>;
+		//alias-41 = <204 0>;
+		alias-42 = <&tlmm_pinmux 79 0>;
+		alias-RI = <&tlmm_pinmux 25 0>;
+		/* WIFI aliases */
+		alias-WLAN_EN = <&tlmm_pinmux 58 0>;
+		alias-WIFI_IRQ = <&tlmm_pinmux 79 0>;
 	};
 };
 

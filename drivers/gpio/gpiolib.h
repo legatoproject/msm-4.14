@@ -200,11 +200,19 @@ struct gpio_desc {
 #define FLAG_OPEN_DRAIN	7	/* Gpio is open drain type */
 #define FLAG_OPEN_SOURCE 8	/* Gpio is open source type */
 #define FLAG_USED_AS_IRQ 9	/* GPIO is connected to an IRQ */
+
 #ifdef CONFIG_SIERRA
 #define FLAG_IS_UP	10	/* GPIO pull type */
 #endif
+
 #define FLAG_IS_HOGGED	11	/* GPIO is hogged */
 #define FLAG_SLEEP_MAY_LOOSE_VALUE 12	/* GPIO may loose value in sleep */
+
+#ifdef CONFIG_SIERRA
+#define FLAG_RING_INDIC 12	/* GPIO is Ring Indicator RI */
+	u16			bit_in_mask;		/* bit to test if bitmask is valid */
+	u16			owned_by_app_proc;	/* function: APP or BUSY/MODEM */
+#endif
 
 	/* Connection label */
 	const char		*label;
@@ -218,6 +226,9 @@ int gpiod_configure_flags(struct gpio_desc *desc, const char *con_id,
 		unsigned long lflags, enum gpiod_flags dflags);
 int gpiod_hog(struct gpio_desc *desc, const char *name,
 		unsigned long lflags, enum gpiod_flags dflags);
+#ifdef CONFIG_SIERRA
+struct class *gpio_class_get(void);
+#endif
 
 /*
  * Return the GPIO number of the passed descriptor relative to its chip

@@ -11,6 +11,13 @@
 
 #include "gpiolib.h"
 
+#ifdef CONFIG_SIERRA
+#include "../base/base.h"
+#include <linux/sierra_gpio.h>
+
+static struct class gpio_class;
+#endif
+
 #define GPIO_IRQF_TRIGGER_FALLING	BIT(0)
 #define GPIO_IRQF_TRIGGER_RISING	BIT(1)
 #define GPIO_IRQF_TRIGGER_BOTH		(GPIO_IRQF_TRIGGER_FALLING | \
@@ -40,6 +47,9 @@ static DEFINE_MUTEX(sysfs_lock);
  *      * is read/write as "in" or "out"
  *      * may also be written as "high" or "low", initializing
  *        output value as specified ("out" implies "low")
+ *   /pull
+ *      * configures pull on /value
+ *      * is read/write as "up" or "down"
  *   /value
  *      * always readable, subject to hardware behavior
  *      * may be writable, as zero/nonzero
@@ -418,9 +428,9 @@ static struct attribute *gpio_attrs[] = {
 	&dev_attr_edge.attr,
 	&dev_attr_value.attr,
 	&dev_attr_active_low.attr,
-	#ifdef CONFIG_SIERRA
+#ifdef CONFIG_SIERRA
 	&dev_attr_pull.attr,
-	#endif
+#endif
 	NULL,
 };
 
@@ -439,6 +449,8 @@ static const struct attribute_group *gpio_groups[] = {
  *   /base ... matching gpio_chip.base (N)
  *   /label ... matching gpio_chip.label
  *   /ngpio ... matching gpio_chip.ngpio
+ *   /mask ... matching gpio_chip.mask
+ *   /mask_v2 ... matching gpio_chip.mask_v2
  */
 
 static ssize_t base_show(struct device *dev,
@@ -468,10 +480,51 @@ static ssize_t ngpio_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(ngpio);
 
+#ifdef CONFIG_SIERRA
+static ssize_t mask_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	const struct gpio_chip	*chip = dev_get_drvdata(dev);
+	u64 mask = 0;
+
+	if (chip->bitmask_valid)
+		mask = chip->mask[0];
+	return sprintf(buf, "0x%08x%08x\n", (u32)(mask >> 32), (u32)mask);
+}
+static DEVICE_ATTR_RO(mask);
+
+/**
+ * chip_mask_v2_show() - Display the GPIO chip mask in v2 format
+ * @dev: The device
+ * @buf: The buffer (1 page) to put the GPIO chip mask
+ *
+ * Returns the number of characters to display
+ */
+static ssize_t mask_v2_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+       const struct gpio_chip	*chip = dev_get_drvdata(dev);
+       int			len = 0;
+       int			i;
+       size_t			nbit = sizeof(u64) * 8;
+
+	for (i = 0; i < chip->ngpio; i += 8) {
+		len += sprintf(buf + len, "%02llx ",
+				(chip->bitmask_valid ?
+					(chip->mask[i / nbit] >> (i % nbit)) & 0xff : 0xff));
+	}
+	return len + sprintf(buf + len, "\n");
+}
+static DEVICE_ATTR_RO(mask_v2);
+#endif
+
 static struct attribute *gpiochip_attrs[] = {
 	&dev_attr_base.attr,
 	&dev_attr_label.attr,
 	&dev_attr_ngpio.attr,
+#ifdef CONFIG_SIERRA
+	&dev_attr_mask.attr,
+	&dev_attr_mask_v2.attr,
+#endif
 	NULL,
 };
 ATTRIBUTE_GROUPS(gpiochip);
@@ -495,14 +548,22 @@ static ssize_t export_store(struct class *class,
 	struct gpio_desc	*desc;
 	int			status;
 
+#ifdef CONFIG_SIERRA
+	status = gpio_map_name_to_num(buf, len, false, &gpio);
+#else
 	status = kstrtol(buf, 0, &gpio);
+#endif /*CONFIG_SIERRA*/
 	if (status < 0)
 		goto done;
 
 	desc = gpio_to_valid_desc(gpio);
 	/* reject invalid GPIOs */
 	if (!desc) {
+#ifdef CONFIG_SIERRA
+		pr_err("%s: invalid GPIO %ld\n", __func__, gpio);
+#else
 		pr_warn("%s: invalid GPIO %ld\n", __func__, gpio);
+#endif
 		return -EINVAL;
 	}
 
@@ -537,8 +598,17 @@ static ssize_t unexport_store(struct class *class,
 	long			gpio;
 	struct gpio_desc	*desc;
 	int			status;
+#ifdef CONFIG_SIERRA
+	const char		*ioname;
+	char			ioname_buf[128];
+	int			index = 0;
+#endif
 
+#ifdef CONFIG_SIERRA
+	status = gpio_map_name_to_num(buf, len, false, &gpio);
+#else
 	status = kstrtol(buf, 0, &gpio);
+#endif /*CONFIG_SIERRA*/
 	if (status < 0)
 		goto done;
 
@@ -559,6 +629,16 @@ static ssize_t unexport_store(struct class *class,
 		status = 0;
 		gpiod_free(desc);
 	}
+
+#ifdef CONFIG_SIERRA
+	gpio_remove_alias_link(desc);
+
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
+		sysfs_remove_link(&gpio_class.p->subsys.kobj, ioname_buf);
+	}
+#endif
+
 done:
 	if (status)
 		pr_debug("%s: status %d\n", __func__, status);
@@ -606,6 +686,10 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 	const char		*ioname = NULL;
 	struct device		*dev;
 	int			offset;
+#ifdef CONFIG_SIERRA
+	char			ioname_buf[128];
+	int			index = 0;
+#endif
 
 	/* can't export until sysfs is available ... */
 	if (!gpio_class.p) {
@@ -659,6 +743,15 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 	if (chip->names && chip->names[offset])
 		ioname = chip->names[offset];
 
+#ifdef CONFIG_SIERRA
+	ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index);
+	if (ioname)
+		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
+	else
+		snprintf(ioname_buf, sizeof(ioname_buf), "gpio_raw%u", desc_to_gpio(desc));
+	ioname = ioname_buf;
+#endif /*CONFIG_SIERRA*/
+
 	dev = device_create_with_groups(&gpio_class, &gdev->dev,
 					MKDEV(0, 0), data, gpio_groups,
 					ioname ? ioname : "gpio%u",
@@ -667,6 +760,15 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 		status = PTR_ERR(dev);
 		goto err_free_data;
 	}
+
+#ifdef CONFIG_SIERRA
+	gpio_create_alias_link(desc, dev);
+
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
+		status = sysfs_create_link(&gpio_class.p->subsys.kobj, &dev->kobj, ioname_buf);
+	}
+#endif
 
 	set_bit(FLAG_EXPORT, &desc->flags);
 	mutex_unlock(&sysfs_lock);
@@ -806,6 +908,10 @@ int gpiochip_sysfs_register(struct gpio_device *gdev)
 	gdev->mockdev = dev;
 	mutex_unlock(&sysfs_lock);
 
+#ifdef CONFIG_SIERRA
+	gpiochip_add_export_v2(dev, chip);
+#endif
+
 	return 0;
 }
 
@@ -817,6 +923,10 @@ void gpiochip_sysfs_unregister(struct gpio_device *gdev)
 
 	if (!gdev->mockdev)
 		return;
+
+#ifdef CONFIG_SIERRA
+	gpiochip_del_unexport_v2(gdev->mockdev, chip);
+#endif
 
 	device_unregister(gdev->mockdev);
 
@@ -832,6 +942,14 @@ void gpiochip_sysfs_unregister(struct gpio_device *gdev)
 			gpiod_free(desc);
 	}
 }
+
+#ifdef CONFIG_SIERRA
+struct class *gpio_class_get(void)
+{
+	return &gpio_class;
+}
+EXPORT_SYMBOL_GPL(gpio_class_get);
+#endif
 
 static int __init gpiolib_sysfs_init(void)
 {

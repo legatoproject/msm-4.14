@@ -17,6 +17,9 @@
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-msm.h"
+#ifdef CONFIG_SIERRA
+#include "../pinctrl-sierra.h"
+#endif
 
 #define FUNCTION(fname)			                \
 	[msm_mux_##fname] = {		                \
@@ -1093,8 +1096,22 @@ static const struct msm_pinctrl_soc_data mdm9607_pinctrl = {
 
 static int mdm9607_pinctrl_probe(struct platform_device *pdev)
 {
+#ifndef CONFIG_SIERRA
 	return msm_pinctrl_probe(pdev, &mdm9607_pinctrl);
+#else
+	int status = msm_pinctrl_probe(pdev, &mdm9607_pinctrl);
+
+	if (!status)
+		status = sierra_pinctrl_probe(pdev);
+	return status;
 }
+
+static int mdm9607_pinctrl_remove(struct platform_device *pdev)
+{
+	sierra_pinctrl_remove(pdev);
+	return msm_pinctrl_remove(pdev);
+}
+#endif
 
 static const struct of_device_id mdm9607_pinctrl_of_match[] = {
 	{ .compatible = "qcom,mdm9607-pinctrl", },
@@ -1108,7 +1125,11 @@ static struct platform_driver mdm9607_pinctrl_driver = {
 		.of_match_table = mdm9607_pinctrl_of_match,
 	},
 	.probe = mdm9607_pinctrl_probe,
+#ifdef CONFIG_SIERRA
+	.remove = mdm9607_pinctrl_remove,
+#else
 	.remove = msm_pinctrl_remove,
+#endif
 };
 
 static int __init mdm9607_pinctrl_init(void)

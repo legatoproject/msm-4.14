@@ -206,4 +206,8 @@ extern int msm_show_resume_irq_mask;
 #define msm_show_resume_irq_mask 0
 #endif
 
+#ifdef CONFIG_SIERRA
+extern struct gpio_chip *msm_pinctrl_get_gpio_chip(struct platform_device *pdev);
+#endif
+
 #endif

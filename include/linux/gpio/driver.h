@@ -125,12 +125,12 @@ struct gpio_chip {
 						unsigned offset);
 	int			(*direction_output)(struct gpio_chip *chip,
 						unsigned offset, int value);
-	#ifdef CONFIG_SIERRA
+#ifdef CONFIG_SIERRA
 	int			(*pull_up)(struct gpio_chip *chip,
     						unsigned offset);
 	int			(*pull_down)(struct gpio_chip *chip,
 						unsigned offset);
-	#endif
+#endif
 	int			(*get)(struct gpio_chip *chip,
 						unsigned offset);
 	void			(*set)(struct gpio_chip *chip,
@@ -210,6 +210,11 @@ struct gpio_chip {
 	 */
 	int (*of_xlate)(struct gpio_chip *gc,
 			const struct of_phandle_args *gpiospec, u32 *flags);
+#endif
+#ifdef CONFIG_SIERRA
+	bool bitmask_valid;	/* if bitmask support valid */
+	u64 *mask;		/* array of gpio bits */
+	int max_bit;		/* highest bit available for check */
 #endif
 };
 
