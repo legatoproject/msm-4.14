@@ -794,7 +794,7 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 				if (desc->gdev->chip->max_bit < desc->bit_in_mask)
 					desc->gdev->chip->max_bit = desc->bit_in_mask;
 			}
-			if (test_bit(FLAG_RING_INDIC, &desc->flags) && gpio_ri == -1) {
+			if (desc && test_bit(FLAG_RING_INDIC, &desc->flags) && (gpio_ri == -1)) {
 				gpio_ri = gpio_alias_map[ngpios].gpio_num;
 				gpio_sync_ri();
 			}

@@ -1298,4 +1298,11 @@ config GPIO_VIPERBOARD
 
 endmenu
 
+# SWISTART
+config GPIO_SWIMCU
+	tristate "SWIMCU GPIOs"
+	depends on MFD_SWIMCU
+	help
+	  Say yes here to access the GPIO signals of Sierra Wireless WP76xx MCU.
+
 endif

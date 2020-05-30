@@ -129,11 +129,11 @@
                  * it requires to know the SWIMCU gpio base address: 200
 		 * see: SWIMCU_GPIO_BASE in arch/arm/mach-msm/include/mach/swimcu.h
 		 */
-		//alias-36 = <200 0>;
-		//alias-37 = <201 0>;
-		//alias-38 = <202 0>;
-		//alias-40 = <203 0>;
-		//alias-41 = <204 0>;
+		alias-36 = <200 0>;
+		alias-37 = <201 0>;
+		alias-38 = <202 0>;
+		alias-40 = <203 0>;
+		alias-41 = <204 0>;
 		alias-42 = <&tlmm_pinmux 79 0>;
 		alias-RI = <&tlmm_pinmux 25 0>;
 		/* WIFI aliases */

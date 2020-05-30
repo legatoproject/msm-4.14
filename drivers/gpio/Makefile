@@ -152,5 +152,6 @@ obj-$(CONFIG_GPIO_ZYNQ)		+= gpio-zynq.o
 obj-$(CONFIG_GPIO_ZX)		+= gpio-zx.o
 obj-$(CONFIG_GPIO_LOONGSON1)	+= gpio-loongson1.o
 # SWISTART
+obj-$(CONFIG_GPIO_SWIMCU)	+= gpio-swimcu.o
 obj-$(CONFIG_SIERRA)		+= sierra_gpio.o
 # SWISTOP
