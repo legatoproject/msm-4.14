@@ -25,6 +25,7 @@
 #include <linux/mfd/swimcu/core.h>
 #include <linux/mfd/swimcu/gpio.h>
 #include <linux/mfd/swimcu/mcidefs.h>
+#include "gpiolib.h"
 
 struct swimcu_gpio_data {
 	struct swimcu *swimcu;
@@ -341,7 +342,17 @@ void swimcu_irq_init(struct swimcu *swimcu, int irq_base)
 		irq_set_chip_data(i, swimcu);
 		irq_set_chip_and_handler(i, &swimcu_irq_chip, handle_simple_irq);
 		irq_set_nested_thread(i, 1);
-		irq_clear_status_flags(i, IRQ_NOREQUEST | IRQ_NOPROBE);
+
+		/* ARM needs us to explicitly flag the IRQ as valid
+		 * and will set them noprobe when we do so. */
+#ifdef CONFIG_ARM
+		/* set_irq_flags(i, IRQF_VALID) -> irq_clear_status_flags(i, IRQ_NOREQUEST)
+		 * https://patchwork.kernel.org/patch/6772731/
+		 */
+		irq_clear_status_flags(i, IRQ_NOREQUEST);
+#else
+		irq_set_noprobe(i);
+#endif
 	}
 }
 

@@ -371,3 +371,9 @@ CONFIG_CLD_HL_SDIO_CORE=y
 # Enable power-on functionality. This includes reset features like
 # "sys_reboot bootloader" support.
 CONFIG_INPUT_QPNP_POWER_ON=y
+
+# MCU driver
+CONFIG_MFD_SWIMCU=y
+CONFIG_GPIO_SWIMCU=y
+CONFIG_SENSORS_SWIMCU=y
+CONFIG_SIERRA_GPIO_WAKEN=y

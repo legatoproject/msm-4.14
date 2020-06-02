@@ -1306,9 +1306,11 @@ config GPIO_SWIMCU
 	  Say yes here to access the GPIO signals of Sierra Wireless WP76xx MCU.
 
 config SIERRA_GPIO_WAKEN
-	def_bool y
+	depends on SIERRA
+	bool "Sierra Wake N Support"
+	default y
 	help
-	  YES to add wake_n gpio driver
+	  Add wake_n gpio driver. If in doubt, say yes here.
 # SWISTOP
 
 endif

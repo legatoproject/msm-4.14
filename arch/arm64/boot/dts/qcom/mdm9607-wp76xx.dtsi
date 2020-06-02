@@ -13,6 +13,7 @@
 /*Inherit the shared DTS and overlay the difference */
 #include "mdm9607-swi.dtsi"
 #include "mdm9607-pinctrl.dtsi"
+#include "mdm9607-swimcu.dtsi"
 
 &soc {
 	sierra_gpio_wake_n {

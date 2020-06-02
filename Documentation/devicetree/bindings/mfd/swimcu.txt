@@ -1,0 +1,30 @@
+* SWIMCU kl03 microcontroller IC
+
+Required parent device properties:
+- compatible : "swimcu,mkl03"
+- reg : the I2C slave address for the swimcu kl03 chip
+- swimcu,nr-gpio : indicates the gpio number of swimcu
+- swimcu,adc-base : assigns the adc base index for swimcu adc
+- swimc,nr-adc : indicates the adc channel number of swimcu
+* Refer to the arch/arm/mach-msm/swimcu.h to set the value
+
+Optional parent device properties:
+- swimcu,func-fwupd-en : /bits/ 8 enables firmware node in the swimcu-pm module of sys
+- swimcu,func-pm-en : /bits/ 8 enable boot_source node in the swimcu-pm module of sys
+- swimcu,func-event-en : /bits/ 8 enables event parse in the swimcu-pm module of sys
+
+Examples:
+
+&i2c_4 {
+	swimcu@3a{
+		compatible = "swimcu,mkl03";
+		reg = <0x3a>;
+		swimcu,nr-gpio = <8>;
+		swimcu,nr-adc = <2>;
+		swimcu,adc-base = <2>;
+
+		swimcu,func-fwupd-en = /bits/ 8 <1>;
+		swimcu,func-pm-en = /bits/ 8 <1>;
+		swimcu,func-event-en = /bits/ 8 <1>;
+	};
+};
