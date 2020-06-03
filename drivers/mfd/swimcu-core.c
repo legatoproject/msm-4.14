@@ -456,6 +456,10 @@ static int swimcu_process_events(struct swimcu *swimcu)
 				swimcu_log(EVENT, "%s: MCU calibrate timeout, reset delay %d\n", __func__, events[i].data.calibrate.time);
 				swimcu_calibrate_event_handle(swimcu, events[i].data.calibrate.time);
 			}
+			else if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_MCI_RESET) {
+				swimcu_log(EVENT, "%s: Unexpected MCI RESET, event[%d] type %d\n", __func__, i, events[i].type);
+				swimcu_gpio_interrupt_recovery(swimcu);
+			}
 			else {
 				pr_warn("%s: Unknown event[%d] type %d\n", __func__, i, events[i].type);
 			}

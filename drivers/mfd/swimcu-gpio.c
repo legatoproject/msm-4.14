@@ -833,3 +833,33 @@ void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int 
 	}
 }
 
+void swimcu_gpio_interrupt_recovery(struct swimcu *swimcu)
+{
+	int gpio;
+
+	swimcu_log(GPIO, "%s: GPIO Interrupt recovering\n", __func__);
+	for(gpio = SWIMCU_GPIO_FIRST; gpio <= SWIMCU_GPIO_LAST; gpio++)
+	{
+		enum swimcu_gpio_irq_index swimcu_irq = swimcu_get_irq_from_gpio(gpio);
+
+		/* Re-enable user-configured IRQ if previously registered*/
+		mutex_lock(&swimcu_gpio_cfg_mutex[gpio]);
+
+		swimcu_log(GPIO, "%s: swimcu_gpio_cfg[%d].params.input.irqc_type: %d, swimcu_irq: %d\n",
+				__func__, gpio, swimcu_gpio_cfg[gpio].params.input.irqc_type, swimcu_irq);
+
+		if ((swimcu_irq != SWIMCU_GPIO_NO_IRQ) && 
+				((swimcu_gpio_cfg[gpio].params.input.irqc_type != MCI_PIN_IRQ_DISABLED) ||
+				(gpio_irq_cfg[swimcu_irq].type != MCI_PIN_IRQ_DISABLED)))
+		{
+			swimcu_gpio_cfg[gpio].params.input.irqc_type = gpio_irq_cfg[swimcu_irq].type;
+			swimcu_log(GPIO, "%s: Attempting re-enable gpio %d irq\n", __func__, gpio);
+			if (0 == _swimcu_gpio_set(swimcu, SWIMCU_GPIO_NOOP, gpio, 0, true))
+			{
+				swimcu_log(GPIO, "%s: Re-enabled irq %d type %X for MCU GPIO %d \n",
+						__func__, swimcu_irq, gpio_irq_cfg[swimcu_irq].type, gpio);
+			}
+		}
+		mutex_unlock(&swimcu_gpio_cfg_mutex[gpio]);
+	}
+}

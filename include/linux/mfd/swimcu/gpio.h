@@ -102,6 +102,7 @@ int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq,
 		struct swimcu_gpio_irq_cfg *irq_cfg);
 
 void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int level);
+void swimcu_gpio_interrupt_recovery(struct swimcu *swimcu);
 
 void swimcu_gpio_module_init(struct swimcu *,
 	bool (*irq_handler)(struct swimcu *, enum swimcu_gpio_irq_index));
