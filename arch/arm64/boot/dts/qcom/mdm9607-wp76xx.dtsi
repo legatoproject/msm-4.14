@@ -15,6 +15,11 @@
 #include "mdm9607-pinctrl.dtsi"
 
 &soc {
+	sierra_gpio_wake_n {
+		compatible = "sierra,gpio_wake_n";
+		wake-n-gpio = <&tlmm_pinmux 26 0>;
+	};
+
 	 tlmm_pinmux: pinctrl@1000000 {
 		/*undefine use of qcom,tlmm-emmc-boot-select*/
 		qcom,tlmm-emmc-boot-select;
