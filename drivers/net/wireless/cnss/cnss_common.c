@@ -261,7 +261,18 @@ EXPORT_SYMBOL(cnss_set_cpus_allowed_ptr);
  */
 void cnss_dump_stack(struct task_struct *task)
 {
+/* If CNSS is a module, CONFIG_CNSS is not going to be defined. At the
+ * same time, show_stack is not going to be available to the module,
+ * because show_stack is not one of the exported symbols (e.g.
+ * EXPORT_SYMBOL(show_stack)). So, do not access show_stack if CNSS is
+ * not built-in.
+ */
+#ifdef CONFIG_CNSS
 	show_stack(task, NULL);
+#else
+    /* nothing we can do */
+    printk(KERN_WARNING "show_stack not available, CNSS is a module.\n");
+#endif
 }
 EXPORT_SYMBOL(cnss_dump_stack);
 
