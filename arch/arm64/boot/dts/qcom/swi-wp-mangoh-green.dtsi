@@ -17,6 +17,62 @@
 	qcom,board-id = <8 0x83>;
 };
 
+&soc {
+	sierra_gpio {
+		// IO expander 1
+		alias-ARDUINO_RESET_LEVEL	= <&ioexp1_gpios 0 0>;
+		alias-BATTCHRGR_PG_N		= <&ioexp1_gpios 1 0>;
+		alias-BATTGAUGE_GPIO		= <&ioexp1_gpios 2 0>;
+		alias-LED_ON			= <&ioexp1_gpios 3 0>;
+		alias-ATMEGA_RESET_GPIO		= <&ioexp1_gpios 4 0>;
+		alias-CONNECT_TO_AV_LED		= <&ioexp1_gpios 5 0>;
+		alias-PCM_ANALOG_SELECT		= <&ioexp1_gpios 6 0>;
+		alias-CONNECT_TO_AV		= <&ioexp1_gpios 7 0>;
+		alias-BOARD_REV_RES1		= <&ioexp1_gpios 8 0>;
+		alias-BOARD_REV_RES2		= <&ioexp1_gpios 9 0>;
+		alias-UART_EXP1_ENN		= <&ioexp1_gpios 10 0>;
+		alias-UART_EXP1_IN		= <&ioexp1_gpios 11 0>;
+		alias-UART_EXP2_IN		= <&ioexp1_gpios 12 0>;
+		alias-SDIO_SEL			= <&ioexp1_gpios 13 0>;
+		alias-SPI_EXP1_ENN		= <&ioexp1_gpios 14 0>;
+		alias-SPI_EXP1_IN		= <&ioexp1_gpios 15 0>;
+		// IO expander 2
+		alias-IOT0_GPIO3	= <&ioexp2_gpios 0 0>;
+		alias-IOT0_GPIO2	= <&ioexp2_gpios 1 0>;
+		alias-IOT0_GPIO1	= <&ioexp2_gpios 2 0>;
+		alias-IOT1_GPIO3	= <&ioexp2_gpios 3 0>;
+		alias-IOT1_GPIO2	= <&ioexp2_gpios 4 0>;
+		alias-IOT1_GPIO1	= <&ioexp2_gpios 5 0>;
+		alias-IOT2_GPIO3	= <&ioexp2_gpios 6 0>;
+		alias-IOT2_GPIO2	= <&ioexp2_gpios 7 0>;
+		alias-IOT2_GPIO1	= <&ioexp2_gpios 8 0>;
+		alias-SENSOR_INT1	= <&ioexp2_gpios 9 0>;
+		alias-SENSOR_INT2	= <&ioexp2_gpios 10 0>;
+		alias-CARD_DETECT_IOT0	= <&ioexp2_gpios 11 0>;
+		alias-CARD_DETECT_IOT2	= <&ioexp2_gpios 12 0>;
+		alias-CARD_DETECT_IOT1	= <&ioexp2_gpios 13 0>;
+		alias-GPIOEXP_INT3	= <&ioexp2_gpios 14 0>;
+		alias-BATTCHRGR_INT	= <&ioexp2_gpios 15 0>;
+		// IO expander 3
+		alias-USB_HUB_INTN	= <&ioexp3_gpios 0 0>;
+		alias-HUB_CONNECT	= <&ioexp3_gpios 1 0>;
+		alias-GPIO_IOT2_RESET	= <&ioexp3_gpios 2 0>;
+		alias-GPIO_IOT1_RESET	= <&ioexp3_gpios 3 0>;
+		alias-GPIO_IOT0_RESET	= <&ioexp3_gpios 4 0>;
+		alias-IOT0_GPIO4	= <&ioexp3_gpios 5 0>;
+		alias-IOT1_GPIO4	= <&ioexp3_gpios 6 0>;
+		alias-IOT2_GPIO4	= <&ioexp3_gpios 7 0>;
+		alias-UART_EXP2_ENN	= <&ioexp3_gpios 8 0>;
+		alias-PCM_EXP1_ENN	= <&ioexp3_gpios 9 0>;
+		alias-PCM_EXP1_SEL	= <&ioexp3_gpios 10 0>;
+		alias-ARD_FTDI		= <&ioexp3_gpios 11 0>;
+		alias-LCD_ON_OFF	= <&ioexp3_gpios 12 0>;
+		alias-FAST_SIM_SWITCH	= <&ioexp3_gpios 13 0>;
+		alias-ARDUINO_USB_CTRL	= <&ioexp3_gpios 14 0>;
+		alias-RS232_ENABLE	= <&ioexp3_gpios 15 0>;
+	};
+};
+
 &i2c_4 {
         ioexp-mux@71 {
                 // IO expanders are below the I2C switch PCA9548
@@ -33,15 +89,9 @@
                         ioexp1_gpios: io_exp@3e {
                                 #gpio-cells = <2>;
                                 gpio-controller;
-                                compatible = "sx1509q";
+                                compatible = "semtech,sx1509q";
                                 reg = <0x3e>;
-                                sx150x,pullup_ena = <0x0>;
-                                sx150x,pulldn_ena = <0x0>;
-                                sx150x,float_ena = <0x0>;
-                                sx150x,polarity = <0x0>;
-                                label = "ioexp1-gpio";
-                                sx150x,gpio_base = <300>;
-                        };
+                         };
                 };
                 i2c@5 {
                         // IO expander 1: channel 5
@@ -51,15 +101,17 @@
                         ioexp2_gpios: io_exp@3f {
                                 #gpio-cells = <2>;
                                 gpio-controller;
-                                compatible = "sx1509q";
+                                compatible = "semtech,sx1509q";
                                 reg = <0x3f>;
+
                                 /* Set pullup for GPIO 11, 12, 13 to select card inserted */
-                                sx150x,pullup_ena = <0x3800>;
-                                sx150x,pulldn_ena = <0x0>;
-                                sx150x,float_ena = <0x0>;
-                                sx150x,polarity = <0x0>;
-                                label = "ioexp2-gpio";
-                                sx150x,gpio_base = <320>;
+                                pinctrl-names = "default";
+                                pinctrl-0 = <&card_detect_iot_pins>;
+
+                                card_detect_iot_pins: gpio11-cfg {
+                                        pins = "gpio11", "gpio12", "gpio13";
+                                        bias-pull-up;
+                                };
                         };
                 };
                 i2c@6 {
@@ -70,14 +122,8 @@
                         ioexp3_gpios: io_exp@70 {
                                 #gpio-cells = <2>;
                                 gpio-controller;
-                                compatible = "sx1509q";
+                                compatible = "semtech,sx1509q";
                                 reg = <0x70>;
-                                sx150x,pullup_ena = <0x0>;
-                                sx150x,pulldn_ena = <0x0>;
-                                sx150x,float_ena = <0x0>;
-                                sx150x,polarity = <0x0>;
-                                label = "ioexp3-gpio";
-                                sx150x,gpio_base = <340>;
                         };
                 };
         };

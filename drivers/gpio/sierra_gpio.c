@@ -113,6 +113,38 @@ static int gpio_sync_ri(void)
 }
 
 /**
+ * gpio_sync_ownership() - update and return the owner of gpio.
+ * Context: After gpio_sync_ri.
+ * Returns 1 if apps, 0 if modem, or -1 if gpio not found.
+ */
+static s16 gpio_sync_ownership(struct gpio_desc *desc)
+{
+	s16 gpio_owner = -1;
+
+	if (desc && desc->gdev && desc->gdev->chip) {
+		/* RI owner is updated by gpio_sync_ri(). Do not overwrite. */
+		if (desc_to_gpio(desc) != gpio_ri) {
+			unsigned long flags;
+			spin_lock_irqsave(&alias_lock, flags);
+			if ((desc->gdev->chip->bitmask_valid)
+			&& (desc->bit_in_mask >= 0) && (desc->bit_in_mask < desc->gdev->chip->ngpio)) {
+				int nmask = desc->bit_in_mask / (sizeof(desc->gdev->chip->mask[0]) * 8);
+				int nbit = desc->bit_in_mask % (sizeof(desc->gdev->chip->mask[0]) * 8);
+				desc->owned_by_app_proc = (desc->gdev->chip->mask[nmask] >> nbit) & 1ULL;
+				if (desc->gdev->chip->max_bit < desc->bit_in_mask)
+					desc->gdev->chip->max_bit = desc->bit_in_mask;
+			}
+			else {
+				desc->owned_by_app_proc = true;
+			}
+			spin_unlock_irqrestore(&alias_lock, flags);
+		}
+		gpio_owner = desc->owned_by_app_proc;
+	}
+	return gpio_owner;
+}
+
+/**
  * gpio_map_name_to_num() - Return the internal GPIO number for an
  *                         external GPIO name
  * @*buf: The external GPIO name (may include a trailing <lf>)
@@ -143,8 +175,10 @@ int gpio_map_name_to_num(const char *buf, int len, bool force, long *gpio_num)
 			/* The multi-function GPIO is used as another feature, cannot export */
 			if (!desc)
 				return -EINVAL;
-			if (!force && !desc->owned_by_app_proc)
-				return -EPERM;
+			if (!force && !desc->owned_by_app_proc) {
+				if (!gpio_sync_ownership(desc))
+					return -EPERM;
+			}
 
 			*gpio_num = gpio_alias_map[i].gpio_num;
 			pr_debug("%s: find GPIO %ld\n", __func__, *gpio_num);
@@ -182,7 +216,8 @@ const char *gpio_map_num_to_name(long gpio_num, bool force, int *index)
 			if (!desc)
 				return NULL;
 			if (!force && !desc->owned_by_app_proc) {
-				return NULL;
+				if (!gpio_sync_ownership(desc))
+					return NULL;
 			}
 			return gpio_alias_map[i].gpio_name;
 		}
@@ -541,7 +576,8 @@ static ssize_t alias_map_show(struct device *dev, struct device_attribute *attr,
 				status += snprintf(buf + status, PAGE_SIZE - status, "%4d,%-4d %c \"%s\"\n",
 							desc->gdev->chip->base,
 							gpio_alias_map[i].gpio_num - desc->gdev->chip->base,
-							desc->owned_by_app_proc ? 'A' : 'M',
+							desc->owned_by_app_proc ? 'A' : 
+								(gpio_sync_ownership(desc) ? 'A' : 'M'),
 							gpio_alias_map[i].gpio_name);
 			else
 				status += snprintf(buf + status, PAGE_SIZE - status, "%9d %c \"%s\"\n",
@@ -687,74 +723,78 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 	struct gpiochip_list	*chip;
 	struct list_head	*list;
 	unsigned long		flags;
+	static int		do_once = 0;
 
 	if (!pdev) {
 		pr_err("%s: NULL input parameter\n", __func__);
 		return -EINVAL;
 	}
 
-	gpio_class = gpio_class_get();
-	if (!gpio_class) {
-		dev_err(&pdev->dev, "NO class for gpio\n");
-		return -ENOENT;
+	if (!do_once) {
+		gpio_class = gpio_class_get();
+		if (!gpio_class) {
+			dev_err(&pdev->dev, "NO class for gpio\n");
+			return -ENOENT;
+		}
+
+		gpiochip1_kset = kset_create_and_add("gpiochip1", NULL, &gpio_class->p->subsys.kobj);
+		if (!gpiochip1_kset) {
+			dev_err(&pdev->dev, "No more memory to create gpiochip1 kset\n");
+			return -ENOMEM;
+		}
+
+		status = sysfs_create_file(&gpiochip1_kset->kobj, &dev_attr_mask.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file gpiochip1/mask: %d\n", status);
+		status = sysfs_create_file(&gpiochip1_kset->kobj, &dev_attr_mask_v2.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file gpiochip1/mask_v2: %d\n", status);
+
+		gpio_v2_kset = kset_create_and_add("v2", NULL, &gpio_class->p->subsys.kobj);
+		if (!gpio_v2_kset) {
+			dev_err(&pdev->dev, "No more memory to create v2 kset\n");
+			return -ENOMEM;
+		}
+
+		gpio_aliases_kset = kset_create_and_add("aliases", NULL, &gpio_v2_kset->kobj);
+		if (!gpio_aliases_kset) {
+			dev_err(&pdev->dev, "No more memory to create aliases kset\n");
+			return -ENOMEM;
+		}
+
+		gpio_aliases_exported_kset = kset_create_and_add("aliases_exported", NULL, &gpio_v2_kset->kobj);
+		if (!gpio_aliases_exported_kset) {
+			dev_err(&pdev->dev, "No more memory to create aliases_exported kset\n");
+			return -ENOMEM;
+		}
+
+		status = sysfs_create_link(&gpio_v2_kset->kobj, &gpiochip1_kset->kobj, "gpiochip1");
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create v2/gpiochip1: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_export.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/export: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_unexport.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/unexport: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_export.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/alias_export: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_unexport.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/alias_unexport: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_define.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/alias_define: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_undefine.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/alias_undefine: %d\n", status);
+		status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_map.attr);
+		if (status < 0)
+			dev_err(&pdev->dev, "Cannot create file v2/alias_map: %d\n", status);
+
+		do_once = 1;
 	}
-
-	gpiochip1_kset = kset_create_and_add("gpiochip1", NULL, &gpio_class->p->subsys.kobj);
-	if (!gpiochip1_kset) {
-		dev_err(&pdev->dev, "No more memory to create gpiochip1 kset\n");
-		return -ENOMEM;
-	}
-
-	status = sysfs_create_file(&gpiochip1_kset->kobj, &dev_attr_mask.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file gpiochip1/mask: %d\n", status);
-	status = sysfs_create_file(&gpiochip1_kset->kobj, &dev_attr_mask_v2.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file gpiochip1/mask_v2: %d\n", status);
-
-	gpio_v2_kset = kset_create_and_add("v2", NULL, &gpio_class->p->subsys.kobj);
-	if (!gpio_v2_kset) {
-		dev_err(&pdev->dev, "No more memory to create v2 kset\n");
-		return -ENOMEM;
-	}
-
-	gpio_aliases_kset = kset_create_and_add("aliases", NULL, &gpio_v2_kset->kobj);
-	if (!gpio_aliases_kset) {
-		dev_err(&pdev->dev, "No more memory to create aliases kset\n");
-		return -ENOMEM;
-	}
-
-	gpio_aliases_exported_kset = kset_create_and_add("aliases_exported", NULL, &gpio_v2_kset->kobj);
-	if (!gpio_aliases_exported_kset) {
-		dev_err(&pdev->dev, "No more memory to create aliases_exported kset\n");
-		return -ENOMEM;
-	}
-
-	status = sysfs_create_link(&gpio_v2_kset->kobj, &gpiochip1_kset->kobj, "gpiochip1");
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create v2/gpiochip1: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_export.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/export: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_unexport.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/unexport: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_export.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/alias_export: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_unexport.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/alias_unexport: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_define.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/alias_define: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_undefine.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/alias_undefine: %d\n", status);
-	status = sysfs_create_file(&gpio_v2_kset->kobj, &dev_attr_alias_map.attr);
-	if (status < 0)
-		dev_err(&pdev->dev, "Cannot create file v2/alias_map: %d\n", status);
-
 	np = pdev->dev.of_node;
 	for_each_property_of_node(np, pp) {
 		struct gpio_desc	*desc;
@@ -771,9 +811,12 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 			gpio = -1;
 			of_property_read_u32(np, pp->name, &gpio);
 		}
-		else
-		{
+		else {
 			gpio = of_get_named_gpio_flags(np, pp->name, 0, (enum of_gpio_flags *)&dummy);
+			if (-EPROBE_DEFER == gpio) {
+				dev_err(&pdev->dev, "Deferring driver init due to \"%s\"\n", pp->name);
+				return -EPROBE_DEFER;
+			}
 		}
 		if (gpio >= 0) {
 			if (ngpios == MAX_NB_GPIOS) {
@@ -784,19 +827,12 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 			/* skip "alias-" from DT name */
 			gpio_alias_map[ngpios].gpio_name = pp->name + sizeof(GPIO_ALIAS_PROPERTY) - 1;
 			gpio_alias_map[ngpios].gpio_num = gpio;
-			if (desc)
-				desc->owned_by_app_proc = !(-1 == gpio_alias_map[ngpios].gpio_num);
-			if (desc && desc->gdev && desc->gdev->chip && (desc->gdev->chip->bitmask_valid)
-				&& (desc->bit_in_mask >= 0) && (desc->bit_in_mask < desc->gdev->chip->ngpio)) {
-				int nmask = desc->bit_in_mask / (sizeof(desc->gdev->chip->mask[0]) * 8);
-				int nbit = desc->bit_in_mask % (sizeof(desc->gdev->chip->mask[0]) * 8);
-				desc->owned_by_app_proc = (desc->gdev->chip->mask[nmask] >> nbit) & 1ULL;
-				if (desc->gdev->chip->max_bit < desc->bit_in_mask)
-					desc->gdev->chip->max_bit = desc->bit_in_mask;
-			}
 			if (desc && test_bit(FLAG_RING_INDIC, &desc->flags) && (gpio_ri == -1)) {
 				gpio_ri = gpio_alias_map[ngpios].gpio_num;
 				gpio_sync_ri();
+			}
+			if (-1 == gpio_sync_ownership(desc)) {
+				dev_info(&pdev->dev, "Ownership not updated for \"%s\".\n", pp->name);
 			}
 			gpio_create_alias_name_file(&gpio_alias_map[ngpios]);
 			dev_info(&pdev->dev, "%d PIN %d FUNC %d NAME \"%s\"\n",
@@ -804,6 +840,9 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 				desc ? desc->owned_by_app_proc : 1,
 				gpio_alias_map[ngpios].gpio_name);
 			ngpios++;
+		}
+		else {
+			dev_err(&pdev->dev, "Skipping \"%s\". Unable to decode.\n", pp->name);
 		}
 	}
 	gpio_alias_dt_count = gpio_alias_count = ngpios;
@@ -854,6 +893,7 @@ int gpio_alias_lookup(const char *alias, struct gpio_desc **gpio)
 		if (gpio_alias_map[i].gpio_name &&
 			(strcmp(alias, gpio_alias_map[i].gpio_name) == 0)) {
 			*gpio = gpio_to_desc(gpio_alias_map[i].gpio_num);
+			gpio_sync_ownership(*gpio);
 			pr_debug("%s: alias %s, find GPIO %d\n", __func__, alias, gpio_alias_map[i].gpio_num);
 			return 0;
 		}
@@ -918,7 +958,12 @@ static int _gpio_alias_define(const char *alias, struct gpio_desc *gpio, bool al
 
 	ext->gpio_name = ioname;
 	ext->gpio_num = gpio_num;
-	gpio->owned_by_app_proc = true;
+	if ( -1 == gpio_sync_ownership(gpio))
+	{
+		pr_warn("%s: Unable to set ownership for gpio %ld\n", __func__, gpio_num);
+		status = -EINVAL;
+		goto done;
+	}
 	spin_unlock_irqrestore(&alias_lock, flags);
 	status = gpio_create_alias_name_file(ext);
 
