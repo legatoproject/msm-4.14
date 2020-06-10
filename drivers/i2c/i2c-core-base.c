@@ -1338,6 +1338,11 @@ int i2c_add_adapter(struct i2c_adapter *adapter)
 {
 	struct device *dev = &adapter->dev;
 	int id;
+#ifdef CONFIG_I2C_START_DEV_NDX_FROM_0
+	int id_search_start = 0;
+#else
+	int id_search_start = __i2c_first_dynamic_bus_num;
+#endif
 
 	if (dev->of_node) {
 		id = of_alias_get_id(dev->of_node, "i2c");
@@ -1349,7 +1354,7 @@ int i2c_add_adapter(struct i2c_adapter *adapter)
 
 	mutex_lock(&core_lock);
 	id = idr_alloc(&i2c_adapter_idr, adapter,
-		       __i2c_first_dynamic_bus_num, 0, GFP_KERNEL);
+		       id_search_start, 0, GFP_KERNEL);
 	mutex_unlock(&core_lock);
 	if (WARN(id < 0, "couldn't get idr"))
 		return id;

@@ -68,6 +68,15 @@ config I2C_MUX
 	  This support is also available as a module.  If so, the module
 	  will be called i2c-mux.
 
+config I2C_START_DEV_NDX_FROM_0
+	bool "Start indexing of I2C devices from 0"
+	default 'y'
+	depends on SIERRA
+	help
+	  Say 'y' here, if you would like to start indexing I2C devices
+	  from 0. Otherwise, kernel will search for available I2C device
+	  index starting from the last one.
+
 source drivers/i2c/muxes/Kconfig
 
 config I2C_HELPER_AUTO
