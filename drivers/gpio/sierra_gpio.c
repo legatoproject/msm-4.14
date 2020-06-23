@@ -66,6 +66,7 @@ static struct gpio_alias_map	gpio_alias_map[MAX_NB_GPIOS];
 #define RI_OWNER_APP        1
 
 static int	gpio_ri = -1;
+static bool	sierra_gpio_probe_done = false;
 
 static int _gpio_alias_define(const char *alias, struct gpio_desc *gpio, bool allow_overwrite);
 static int _gpio_alias_undefine(const char *alias);
@@ -673,7 +674,7 @@ int gpiochip_add_export_v2(struct device *dev, struct gpio_chip *chip)
 		kfree(newchip);
 		newchip = thischip;
 	}
-	if (gpio_v2_kset)
+	if ((gpio_v2_kset) && (sierra_gpio_probe_done))
 		gpiochip_export_v2(newchip);
 	return 0;
 }
@@ -706,7 +707,7 @@ void gpiochip_del_unexport_v2(struct device *dev, struct gpio_chip *chip)
 	}
 	spin_unlock_irqrestore(&gpiochip_lock, flags);
 	if (thischip) {
-		if (gpio_v2_kset)
+		if ((gpio_v2_kset) && (sierra_gpio_probe_done))
 			gpiochip_unexport_v2(thischip);
 		kfree(thischip);
 	}
@@ -715,22 +716,23 @@ void gpiochip_del_unexport_v2(struct device *dev, struct gpio_chip *chip)
 static int sierra_gpio_probe(struct platform_device *pdev)
 {
 	struct device_node	*np;
-	int			ngpios = 0;
-	int			status;
 	int			gpio;
 	struct property		*pp;
 	int			dummy;
 	struct gpiochip_list	*chip;
 	struct list_head	*list;
 	unsigned long		flags;
-	static int		do_once = 0;
+	static char		*deferred_ppname = NULL;
+	static int		ngpios = 0;
+	static int		status = 0;
 
 	if (!pdev) {
 		pr_err("%s: NULL input parameter\n", __func__);
 		return -EINVAL;
 	}
 
-	if (!do_once) {
+	/* Do only once; skip, if coming back as deferred */
+	if (!deferred_ppname) {
 		gpio_class = gpio_class_get();
 		if (!gpio_class) {
 			dev_err(&pdev->dev, "NO class for gpio\n");
@@ -793,17 +795,25 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 		if (status < 0)
 			dev_err(&pdev->dev, "Cannot create file v2/alias_map: %d\n", status);
 
-		do_once = 1;
 	}
 	np = pdev->dev.of_node;
 	for_each_property_of_node(np, pp) {
 		struct gpio_desc	*desc;
 
-		dev_err(&pdev->dev, "property \"%s\": length %d\n", pp->name, pp->length);
-		if (strcmp(pp->name, "compatible") == 0)
+		/* Deferred? Skip to deferred property. */
+                if (deferred_ppname) {
+			if (strcmp(pp->name, deferred_ppname) != 0) {
+				dev_info(&pdev->dev, "Skipping property %s processed in previous pass\n", pp->name);
+				continue;
+			}
+			deferred_ppname = NULL;
+		}
+
+		dev_dbg(&pdev->dev, "property \"%s\": length %d\n", pp->name, pp->length);
+		if ( (strcmp(pp->name, "compatible") == 0) || (strcmp(pp->name, "name") == 0) )
 			continue;
 		if (strncmp(pp->name, GPIO_ALIAS_PROPERTY, sizeof(GPIO_ALIAS_PROPERTY) - 1)) {
-			dev_err(&pdev->dev, "Skipping unknown property \"%s\"\n", pp->name);
+			dev_info(&pdev->dev, "Skipping unknown property \"%s\"\n", pp->name);
 			continue;
 		}
 		if (pp->length == (sizeof(u32)*2))
@@ -814,7 +824,8 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 		else {
 			gpio = of_get_named_gpio_flags(np, pp->name, 0, (enum of_gpio_flags *)&dummy);
 			if (-EPROBE_DEFER == gpio) {
-				dev_err(&pdev->dev, "Deferring driver init due to \"%s\"\n", pp->name);
+				dev_info(&pdev->dev, "Deferring driver init due to \"%s\"\n", pp->name);
+				deferred_ppname = pp->name;
 				return -EPROBE_DEFER;
 			}
 		}
@@ -835,7 +846,7 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 				dev_info(&pdev->dev, "Ownership not updated for \"%s\".\n", pp->name);
 			}
 			gpio_create_alias_name_file(&gpio_alias_map[ngpios]);
-			dev_info(&pdev->dev, "%d PIN %d FUNC %d NAME \"%s\"\n",
+			dev_dbg(&pdev->dev, "%d PIN %d FUNC %d NAME \"%s\"\n",
 				ngpios, gpio_alias_map[ngpios].gpio_num,
 				desc ? desc->owned_by_app_proc : 1,
 				gpio_alias_map[ngpios].gpio_name);
@@ -868,14 +879,16 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 		}
 	}
 
+	/* Export gpiochips to /sys/class/gpio/v2/ */
 	spin_lock_irqsave(&gpiochip_lock, flags);
 	list_for_each(list, &gpiochip_list) {
 		chip = list_entry(list, struct gpiochip_list, list);
-		dev_info(&pdev->dev, "Export to v2 gpiochip %s\n", chip->chip->label);
+		dev_dbg(&pdev->dev, "Export to v2 gpiochip %s\n", chip->chip->label);
 		spin_unlock_irqrestore(&gpiochip_lock, flags);
 		gpiochip_export_v2(chip);
 		spin_lock_irqsave(&gpiochip_lock, flags);
 	}
+	sierra_gpio_probe_done = true;
 	spin_unlock_irqrestore(&gpiochip_lock, flags);
 
 	return status;
