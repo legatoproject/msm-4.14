@@ -587,6 +587,17 @@ config TEST_IRQ_REQUESTER
 
 	  If in doubt, say N.
 
+config SIERRA_TZDEV
+	bool "Sierra TrustZone Crypto Engine"
+	depends on SIERRA
+	default n
+	help
+	  This driver provides TrustZone Crypto Engine secure storage
+	  service to generate keyblob, seal data and unseal data.
+
+	  If in doubt, say N.
+
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
