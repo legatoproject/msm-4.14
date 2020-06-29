@@ -443,6 +443,7 @@ obj-$(CONFIG_SND_SOC_WM8903)	+= snd-soc-wm8903.o
 obj-$(CONFIG_SND_SOC_WM8904)	+= snd-soc-wm8904.o
 obj-$(CONFIG_SND_SOC_WM8996)	+= snd-soc-wm8996.o
 obj-$(CONFIG_SND_SOC_WM8940)	+= snd-soc-wm8940.o
+obj-$(CONFIG_SND_SOC_WM8944)	+= snd-soc-wm8944.o
 obj-$(CONFIG_SND_SOC_WM8955)	+= snd-soc-wm8955.o
 obj-$(CONFIG_SND_SOC_WM8960)	+= snd-soc-wm8960.o
 obj-$(CONFIG_SND_SOC_WM8961)	+= snd-soc-wm8961.o
