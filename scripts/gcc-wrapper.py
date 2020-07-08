@@ -30,6 +30,8 @@
 # Invoke gcc, looking for warnings, and causing a failure if there are
 # non-whitelisted warnings.
 
+from __future__ import print_function
+
 import errno
 import re
 import os
