@@ -26,7 +26,12 @@
 #include "tx.h"
 #include "debug.h"
 
+#ifdef CONFIG_SIERRA
+/* Timeout in milliseconds; keeping an increased value as good measure. */
+#define WL1271_WAKEUP_TIMEOUT 2500
+#else
 #define WL1271_WAKEUP_TIMEOUT 500
+#endif
 
 #define ELP_ENTRY_DELAY  30
 #define ELP_ENTRY_DELAY_FORCE_PS  5

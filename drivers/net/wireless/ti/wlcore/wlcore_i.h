@@ -212,6 +212,9 @@ struct wlcore_platdev_data {
 	bool ref_clock_xtal;	/* specify whether the clock is XTAL or not */
 	u32 ref_clock_freq;	/* in Hertz */
 	u32 tcxo_clock_freq;	/* in Hertz, tcxo is always XTAL */
+#ifdef CONFIG_SIERRA
+	int wlan_en;
+#endif
 	bool pwr_in_suspend;
 };
 

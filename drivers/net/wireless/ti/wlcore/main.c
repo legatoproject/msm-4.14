@@ -26,6 +26,9 @@
 #include <linux/vmalloc.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#ifdef CONFIG_SIERRA
+#include <linux/gpio.h>
+#endif
 
 #include "wlcore.h"
 #include "debug.h"
@@ -1706,6 +1709,10 @@ static int wl1271_op_suspend(struct ieee80211_hw *hw,
 {
 	struct wl1271 *wl = hw->priv;
 	struct wl12xx_vif *wlvif;
+#ifdef CONFIG_SIERRA
+	struct platform_device *pdev = wl->pdev;
+	struct wlcore_platdev_data *pdev_data = dev_get_platdata(&pdev->dev);
+#endif
 	int ret;
 
 	wl1271_debug(DEBUG_MAC80211, "mac80211 suspend wow=%d", !!wow);
@@ -1785,6 +1792,11 @@ out_sleep:
 	 */
 	cancel_delayed_work(&wl->tx_watchdog_work);
 
+#ifdef CONFIG_SIERRA
+	/* power down the WLAN module */
+	gpio_set_value_cansleep(pdev_data->wlan_en, 0);
+#endif
+
 	return 0;
 }
 
@@ -1792,6 +1804,10 @@ static int wl1271_op_resume(struct ieee80211_hw *hw)
 {
 	struct wl1271 *wl = hw->priv;
 	struct wl12xx_vif *wlvif;
+#ifdef CONFIG_SIERRA
+	struct platform_device *pdev = wl->pdev;
+	struct wlcore_platdev_data *pdev_data = dev_get_platdata(&pdev->dev);
+#endif
 	unsigned long flags;
 	bool run_irq_work = false, pending_recovery;
 	int ret;
@@ -1799,6 +1815,12 @@ static int wl1271_op_resume(struct ieee80211_hw *hw)
 	wl1271_debug(DEBUG_MAC80211, "mac80211 resume wow=%d",
 		     wl->wow_enabled);
 	WARN_ON(!wl->wow_enabled);
+
+
+#ifdef CONFIG_SIERRA
+	/* power up the WLAN module */
+	gpio_set_value_cansleep(pdev_data->wlan_en, 1);
+#endif
 
 	/*
 	 * re-enable irq_work enqueuing, and call irq_work directly if
@@ -2502,6 +2524,10 @@ static int wl1271_op_add_interface(struct ieee80211_hw *hw,
 	struct vif_counter_data vif_count;
 	int ret = 0;
 	u8 role_type;
+#ifdef CONFIG_SIERRA
+	struct platform_device *pdev = wl->pdev;
+	struct wlcore_platdev_data *pdev_data = dev_get_platdata(&pdev->dev);
+#endif
 
 	if (wl->plt) {
 		wl1271_error("Adding Interface not allowed while in PLT mode");
@@ -2549,6 +2575,10 @@ static int wl1271_op_add_interface(struct ieee80211_hw *hw,
 	if (ret < 0)
 		goto out;
 
+#ifdef CONFIG_SIERRA
+	/* Power-up the WLAN module */
+	gpio_set_value_cansleep(pdev_data->wlan_en, 1);
+#endif
 	if (wl12xx_need_fw_change(wl, vif_count, true)) {
 		wl12xx_force_active_psm(wl);
 		set_bit(WL1271_FLAG_INTENDED_FW_RECOVERY, &wl->flags);
@@ -2763,6 +2793,10 @@ static void wl1271_op_remove_interface(struct ieee80211_hw *hw,
 	struct wl12xx_vif *wlvif = wl12xx_vif_to_data(vif);
 	struct wl12xx_vif *iter;
 	struct vif_counter_data vif_count;
+#ifdef CONFIG_SIERRA
+	struct platform_device *pdev = wl->pdev;
+	struct wlcore_platdev_data *pdev_data = dev_get_platdata(&pdev->dev);
+#endif
 
 	wl12xx_get_vif_count(hw, vif, &vif_count);
 	mutex_lock(&wl->mutex);
@@ -2783,6 +2817,10 @@ static void wl1271_op_remove_interface(struct ieee80211_hw *hw,
 		break;
 	}
 	WARN_ON(iter != wlvif);
+#ifdef CONFIG_SIERRA
+	/* Power-down the WLAN module */
+	gpio_set_value_cansleep(pdev_data->wlan_en, 0);
+#endif
 	if (wl12xx_need_fw_change(wl, vif_count, false)) {
 		wl12xx_force_active_psm(wl);
 		set_bit(WL1271_FLAG_INTENDED_FW_RECOVERY, &wl->flags);
@@ -6569,6 +6607,19 @@ int wlcore_probe(struct wl1271 *wl, struct platform_device *pdev)
 	wl->pdev = pdev;
 	platform_set_drvdata(pdev, wl);
 
+#ifdef CONFIG_SIERRA
+	/*
+	 * Retrieve WLAN_EN GPIO from top-level platform data. This must
+	 * have been already initilized from top-level _probe() function.
+	 */
+	pdev_data = dev_get_platdata(&pdev->dev);
+	if (devm_gpio_request(&pdev->dev, pdev_data->wlan_en, "WLAN_EN")) {
+		wl1271_error("cannot assign WLAN_EN GPIO%d.\n", pdev_data->wlan_en);
+		return -EBUSY;
+	}
+	gpio_direction_output(pdev_data->wlan_en, 1);
+#endif
+
 	if (pdev_data->family && pdev_data->family->nvs_name) {
 		nvs_name = pdev_data->family->nvs_name;
 		ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
@@ -6594,6 +6645,13 @@ int wlcore_remove(struct platform_device *pdev)
 
 	if (pdev_data->family && pdev_data->family->nvs_name)
 		wait_for_completion(&wl->nvs_loading_complete);
+
+#ifdef CONFIG_SIERRA
+	/* De-assert and free WLAN_EN GPIO */
+	gpio_set_value_cansleep(pdev_data->wlan_en, 0);
+	gpio_direction_input(pdev_data->wlan_en);
+	devm_gpio_free(&pdev->dev, pdev_data->wlan_en);
+#endif
 	if (!wl->initialized)
 		return 0;
 

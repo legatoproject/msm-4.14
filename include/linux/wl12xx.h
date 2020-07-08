@@ -55,4 +55,38 @@ struct wl1251_platform_data *wl1251_get_platform_data(void)
 
 #endif
 
+#ifdef CONFIG_SIERRA
+/* Support static platform data */
+
+struct wl12xx_static_platform_data {
+	int irq;
+	int ref_clock_freq;
+	int tcxo_clock_freq;
+	int wlan_en;
+};
+
+#ifdef CONFIG_WILINK_PLATFORM_DATA
+
+int wl12xx_set_platform_data(const struct wl12xx_static_platform_data *data);
+
+struct wl12xx_static_platform_data *wl12xx_get_platform_data(void);
+
+#else
+
+static inline
+int wl12xx_set_platform_data(const struct wl12xx_static_platform_data *data)
+{
+	return -ENOSYS;
+}
+
+static inline
+struct wl12xx_static_platform_data *wl12xx_get_platform_data(void)
+{
+	return ERR_PTR(-ENODATA);
+}
+
+#endif /* CONFIG_WILINK_PLATFORM_DATA */
+
+#endif /* CONFIG_SIERRA */
+
 #endif

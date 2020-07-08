@@ -40,6 +40,10 @@
 #include "wl12xx_80211.h"
 #include "io.h"
 
+#ifdef CONFIG_SIERRA
+#include <linux/wl12xx.h>
+#endif
+
 #ifndef SDIO_VENDOR_ID_TI
 #define SDIO_VENDOR_ID_TI		0x0097
 #endif
@@ -282,6 +286,28 @@ static int wlcore_probe_of(struct device *dev, int *irq,
 }
 #endif
 
+#ifdef CONFIG_SIERRA
+static int wlcore_get_static_platform_data(int *irq, struct wlcore_platdev_data *pdev_data)
+{
+	struct wl12xx_static_platform_data *pdata;
+
+	pdata = wl12xx_get_platform_data();
+	if (IS_ERR(pdata))
+	{
+		pr_err("%s: wl12xx platform_data retreival failed\n", __func__);
+		return -EINVAL;
+	}
+
+	pdev_data->wlan_en = pdata->wlan_en;
+	pdev_data->ref_clock_freq = pdata->ref_clock_freq;
+	pdev_data->tcxo_clock_freq = pdata->tcxo_clock_freq;
+	pdev_data->family = &wl18xx_data;
+	*irq = pdata->irq;
+
+	return 0;
+}
+#endif
+
 static int wl1271_probe(struct sdio_func *func,
 				  const struct sdio_device_id *id)
 {
@@ -292,6 +318,9 @@ static int wl1271_probe(struct sdio_func *func,
 	int ret = -ENOMEM;
 	int irq;
 	const char *chip_family;
+#ifdef CONFIG_SIERRA
+	bool static_pdata = false;
+#endif
 
 	/* We are only able to handle the wlan function */
 	if (func->num != 0x02)
@@ -315,7 +344,19 @@ static int wl1271_probe(struct sdio_func *func,
 	/* Use block mode for transferring over one block size of data */
 	func->card->quirks |= MMC_QUIRK_BLKSZ_FOR_BYTE_MODE;
 
+#ifdef CONFIG_SIERRA
+	/* Fake non-removable card */
+	func->card->host->caps |= MMC_CAP_NONREMOVABLE;
+
 	ret = wlcore_probe_of(&func->dev, &irq, pdev_data);
+	if (ret) {
+		/* fallback to static platform data */
+		ret = wlcore_get_static_platform_data(&irq, pdev_data);
+		static_pdata = true;
+	}
+#else
+	ret = wlcore_probe_of(&func->dev, &irq, pdev_data);
+#endif
 	if (ret)
 		goto out;
 
@@ -356,6 +397,10 @@ static int wl1271_probe(struct sdio_func *func,
 	res[0].start = irq;
 	res[0].flags = IORESOURCE_IRQ |
 		       irqd_get_trigger_type(irq_get_irq_data(irq));
+#ifdef CONFIG_SIERRA
+	if (true == static_pdata)
+		res[0].flags = IORESOURCE_IRQ | IRQF_TRIGGER_HIGH;
+#endif
 	res[0].name = "irq";
 
 	ret = platform_device_add_resources(glue->core, res, ARRAY_SIZE(res));
@@ -391,6 +436,12 @@ static void wl1271_remove(struct sdio_func *func)
 
 	/* Undo decrement done above in wl1271_probe */
 	pm_runtime_get_noresume(&func->dev);
+
+#ifdef CONFIG_SIERRA
+	/* Undo faking a non-removable card, force detect after 1s */
+	func->card->host->caps &= ~MMC_CAP_NONREMOVABLE;
+	mmc_detect_change(func->card->host, HZ);
+#endif
 
 	platform_device_unregister(glue->core);
 }

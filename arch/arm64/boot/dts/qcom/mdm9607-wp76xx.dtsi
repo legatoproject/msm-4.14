@@ -111,6 +111,14 @@
 		};
 	};
 
+	sdcard_ext_vreg: sdcard_ext_vreg {
+	/* undefine (by overriding) the use of pm-gpio4 *
+	 * we don't use pm-gpio4 for sdcard_ext_vreg.   *
+	 */
+		gpio;
+		pinctrl-names;
+		pinctrl-0;
+	};
 
 	sound-9306 {
 		status = "disabled";
@@ -209,6 +217,31 @@
 };
 
 &qnand_1 {
+	status = "ok";
+};
+
+&sdhc_2 {
+	vdd-supply = <&sdcard_ext_vreg>;
+	qcom,vdd-voltage-level = <2850000 2850000>;
+	qcom,vdd-current-level = <15000 400000>;
+
+	vdd-io-supply = <&mdm9607_l13>;
+	qcom,vdd-io-voltage-level = <1800000 2850000>;
+	qcom,vdd-io-current-level = <200 50000>;
+
+	#address-cells = <0>;
+	interrupt-parent = <&sdhc_2>;
+	interrupts = <0 1>;
+	#interrupt-cells = <1>;
+	interrupt-map-mask = <0xffffffff>;
+	interrupt-map = <0 &intc 0 125 0
+			1 &intc 0 221 0>;
+	interrupt-names = "hc_irq", "pwr_irq";
+
+	pinctrl-names = "active", "sleep";
+	pinctrl-0 = <&sdc2_clk_on &sdc2_cmd_on &sdc2_data_on &sdc2_cd_on>;
+	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off>;
+
 	status = "ok";
 };
 

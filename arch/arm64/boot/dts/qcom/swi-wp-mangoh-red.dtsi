@@ -17,6 +17,12 @@
 	qcom,board-id = <8 0x82>;
 };
 
+&sdhc_2 {
+	status = "ok";
+	cap-power-off-card;
+	keep-power-in-suspend;
+};
+
 &soc {
 	sierra_gpio {
 		alias-BATTGAUGE_INT		= <&ioexp_gpios 0 0>;

@@ -1804,6 +1804,7 @@ static int sdhci_msm_pm_qos_parse_irq(struct device *dev,
 	/* must specify cpu for "affine_cores" type */
 	if (pdata->pm_qos_data.irq_req_type == PM_QOS_REQ_AFFINE_CORES) {
 		pdata->pm_qos_data.irq_cpu = -1;
+#if !defined(CONFIG_SIERRA) || (defined(CONFIG_SIERRA) && defined(CONFIG_SMP))
 		ret = of_property_read_u32(np, "qcom,pm-qos-irq-cpu", &cpu);
 		if (ret) {
 			dev_err(dev, "%s: error %d reading irq cpu\n", __func__,
@@ -1817,6 +1818,7 @@ static int sdhci_msm_pm_qos_parse_irq(struct device *dev,
 			goto out;
 		}
 		pdata->pm_qos_data.irq_cpu = cpu;
+#endif
 	}
 
 	if (of_property_count_u32_elems(np, "qcom,pm-qos-irq-latency") !=
@@ -2133,6 +2135,11 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 
 	if (of_get_property(np, "qcom,nonhotplug", NULL))
 		pdata->nonhotplug = true;
+
+#ifdef CONFIG_SIERRA
+	if (of_find_property(np, "cap-power-off-card", NULL))
+		pdata->power_off_card = true;
+#endif
 
 	pdata->largeaddressbus =
 		of_property_read_bool(np, "qcom,large-address-bus");
@@ -5106,6 +5113,11 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 
 	if (msm_host->pdata->nonhotplug)
 		msm_host->mmc->caps2 |= MMC_CAP2_NONHOTPLUG;
+
+#ifdef CONFIG_SIERRA
+	if (msm_host->pdata->power_off_card)
+		msm_host->mmc->caps |= MMC_CAP_POWER_OFF_CARD;
+#endif
 
 	msm_host->mmc->sdr104_wa = msm_host->pdata->sdr104_wa;
 
