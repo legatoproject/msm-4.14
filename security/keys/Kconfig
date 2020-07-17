@@ -20,6 +20,15 @@ config KEYS
 
 	  If you are unsure as to whether this is required, answer N.
 
+config KEYS_KEYSTORE
+bool "Load system keys from keystore"
+	depends on SYSTEM_TRUSTED_KEYRING && KEYS && SIERRA
+	help
+	  Load system keys from non-volatile secure storage device.
+
+	  If you are unsure, answer N.
+
+
 config KEYS_COMPAT
 	def_bool y
 	depends on COMPAT && KEYS

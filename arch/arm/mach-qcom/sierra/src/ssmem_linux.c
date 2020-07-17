@@ -162,7 +162,7 @@ _global uint8_t *ssmem_smem_base_addr_get(void)
   if (!ssmem_base)
   {
     ssmem_base = (unsigned char *)ioremap_nocache(SSMEM_MEM_BASE_ADDR,
-                                                  SSMEM_MEM_SIZE);    
+                                                  SSMEM_MEM_SIZE);
     if (!ssmem_base)
     {
       SWI_PRINT(SWI_ERROR, "sierra_smem_base_addr_get error");

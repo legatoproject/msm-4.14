@@ -20,6 +20,8 @@
 #include <keys/system_keyring.h>
 #include <crypto/pkcs7.h>
 
+#include <sierra/api/ssmem_keystore.h>
+
 static struct key *builtin_trusted_keys;
 #ifdef CONFIG_SECONDARY_TRUSTED_KEYRING
 static struct key *secondary_trusted_keys;
@@ -133,18 +135,31 @@ static __init int system_trusted_keyring_init(void)
 device_initcall(system_trusted_keyring_init);
 
 /*
- * Load the compiled-in list of X.509 certificates.
+ * Load the compiled-in list of X.509 certificates or
+ * Sierra Wireless keystore certificates, but not both.
  */
 static __init int load_system_certificate_list(void)
 {
 	key_ref_t key;
 	const u8 *p, *end;
 	size_t plen;
+	void *ptr;
 
-	pr_notice("Loading compiled-in X.509 certificates\n");
+	/* Try Sierra Wireless keystore first. If not found (returns NULL), we will
+	   attempt to load compiled-in X509 certificates.
+	 */
+	ptr = (void *)keystore_init();
 
-	p = system_certificate_list;
-	end = p + system_certificate_list_size;
+	if (ptr != NULL) {
+		pr_notice("Loading keystore X.509 certificates list\n");
+		p = keystore_list(ptr);
+		end = p + keystore_size(ptr);
+	} else {
+		pr_notice("Loading compiled-in X.509 certificates list\n");
+		p = system_certificate_list;
+		end = p + system_certificate_list_size;
+	}
+
 	while (p < end) {
 		/* Each cert begins with an ASN.1 SEQUENCE tag and must be more
 		 * than 256 bytes in size.
