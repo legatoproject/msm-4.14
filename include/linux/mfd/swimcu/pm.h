@@ -25,6 +25,8 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags);
 
 int swimcu_pm_sysfs_opt_update(struct swimcu *swimcu);
 
+void swimcu_pm_sysfs_remove(struct swimcu *swimcu, int func_flags);
+
 void swimcu_pm_sysfs_deinit(struct swimcu *swimcu);
 
 void swimcu_wakeup_trigger(void);
@@ -32,6 +34,8 @@ void swimcu_wakeup_trigger(void);
 void swimcu_set_wakeup_source(enum mci_protocol_wakeup_source_type_e type, u16 value);
 
 void swimcu_set_reset_source(enum mci_protocol_reset_source_e value);
+
+void swimcu_watchdog_event_handle(struct swimcu *swimcu, u32 delay);
 
 void wake_n_set_callback(void (*event_cb)(void));
 

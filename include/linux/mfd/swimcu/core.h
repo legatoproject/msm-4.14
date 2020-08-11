@@ -66,6 +66,11 @@ enum swimcu_adc_compare_mode
 #define SWIMCU_FUNC_FLAG_WATCHDOG    (1 << 3)
 #define SWIMCU_FUNC_FLAG_PSM         (1 << 4)
 
+#define SWIMCU_FUNC_APPL             (SWIMCU_FUNC_FLAG_FWUPD | \
+                                      SWIMCU_FUNC_FLAG_PM |    \
+                                      SWIMCU_FUNC_FLAG_EVENT | \
+                                      SWIMCU_FUNC_FLAG_WATCHDOG)
+
 #define SWIMCU_FUNC_MANDATORY        (SWIMCU_FUNC_FLAG_FWUPD | \
                                       SWIMCU_FUNC_FLAG_PM |    \
                                       SWIMCU_FUNC_FLAG_EVENT)
@@ -166,6 +171,7 @@ struct swimcu {
 	struct kobject pm_firmware_kobj;
 	struct kobject pm_boot_source_adc_kobj;
 	struct kobject pm_psm_kobj;
+	struct kobject pm_watchdog_kobj;
 
 	/* Client devices */
 	struct swimcu_gpio gpio;

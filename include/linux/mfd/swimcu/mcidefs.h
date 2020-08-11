@@ -565,6 +565,12 @@ struct mci_event_s
       enum mci_protocol_wakeup_source_type_e type;
       uint16_t                               value;
     } wusrc;
+
+    struct
+    {
+      uint32_t                               delay;
+    } watchdog;
+
   } data;                               /* event data */
 };
 
@@ -693,5 +699,15 @@ extern enum mci_protocol_status_code_e swimcu_pm_pwr_off(
 extern int swimcu_gpio_set_trigger(int gpio, enum mci_pin_irqc_type_e type);
 
 extern enum mci_pin_irqc_type_e swimcu_gpio_get_trigger(int gpio);
+
+/*
+ * MCU timer service
+ */
+extern enum mci_protocol_status_code_e
+  mci_appl_watchdog_start(struct swimcu *swimcup, u32 timeout, u32 delay);
+
+extern enum mci_protocol_status_code_e
+  mci_appl_timer_stop(struct swimcu *swimcup, u32 * timep);
+
 
 #endif  /* MCIDEFS_H */

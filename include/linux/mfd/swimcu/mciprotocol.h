@@ -212,6 +212,40 @@ enum mci_protocol_reset_source_e
 
 /************
 *
+* Name:     mci_protocol_test_optype_e - Operation type for test services
+*
+* Purpose:  Enumerate the test service operation type
+*
+* Members:  See below
+*
+* Note:
+*
+************/
+enum mci_protocol_test_service_optype_e
+{
+  MCI_PROTOCOL_TEST_CONFIG_OPTYPE_NONE = 0x00,  /* placeholder */
+  MCI_PROTOCOL_TEST_CONFIG_OPTYPE_GET  = 0x01,  /* get value of a single attribute */
+  MCI_PROTOCOL_TEST_CONFIG_OPTYPE_SET  = 0x02,  /* set value of a single attribute */
+};
+
+#define MCI_PROTOCOL_TEST_CONFIG_GET_ARG_COUNT     1
+#define MCI_PROTOCOL_TEST_CONFIG_GET_RESULT_COUNT  1
+
+#define MCI_PROTOCOL_TEST_CONFIG_SET_ARG_COUNT     2
+#define MCI_PROTOCOL_TEST_CONFIG_SET_RESULT_COUNT  0
+
+/* Bit fields of the first parameter:
+*  [31:16] unused
+*  [15: 8] bitmask representation of parameter index
+*  [ 7: 0] operation type code
+*/
+#define MCI_PROTOCOL_TEST_CONFIG_OPTYP_MASK        0x000000FF
+#define MCI_PROTOCOL_TEST_CONFIG_OPTYP_SHIFT       0
+#define MCI_PROTOCOL_TEST_CONFIG_INDEX_MASK        0x000FF000
+#define MCI_PROTOCOL_TEST_CONFIG_INDEX_SHIFT       12
+
+/************
+*
 * Name:     mci_protocol_event_service_optype_e - Operation type for event services
 *
 * Purpose:  Enumerate the event service operation type
@@ -1032,6 +1066,8 @@ enum mci_protocol_timer_read_input_type_e
 */
 #define MCI_PROTOCOL_TIMER_IDLE_PARAMS_COUNT           1
 #define MCI_PROTOCOL_TIMER_IDLE_RESULT_COUNT           2
+
+#define MCI_PROTOCOL_TIMER_START_INPUT_READ_COUNT      5
 
 /* Bit fields of the first parameter for all TIMER_SERVICE requests:
 *  TIMER_OPTYPE:   bits [ 0, 7] - timer operation type

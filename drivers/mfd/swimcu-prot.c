@@ -736,12 +736,7 @@ enum mci_protocol_status_code_e swimcu_ping(struct swimcu *swimcu)
 	struct mci_protocol_packet_s packet;
 	uint32_t params[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
 
-	mutex_lock(&swimcu->mcu_transaction_mutex);
-
-	swimcu->version_major = 0;
-	swimcu->version_minor = 0;
-	swimcu->target_dev_id = 0;
-	swimcu->opt_func_mask = 0x0;
+	mutex_lock(&swimcu->mcu_transaction_mutex);	
 
 	/* Ping the micro-controller and wait for response */
 	frame.type = MCI_PROTOCOL_FRAME_TYPE_PING_REQ;
@@ -1822,6 +1817,12 @@ enum mci_protocol_status_code_e swimcu_event_query(
 						>> MCI_PROTOCOL_EVENT_WUSRC_VALUE_SHIFT;
 					break;
 
+				case MCI_PROTOCOL_EVENT_TYPE_WATCHDOG:
+
+					eventp[i].data.watchdog.delay = (uint32_t)
+						(buffer[i] & ~MCI_PROTOCOL_EVENT_TYPE_MASK);
+					break;
+
 				default:
 					pr_err("%s: Unknown event[%d] type %d: ", __func__, i, eventp[i].type);
 			}
@@ -1839,3 +1840,92 @@ enum mci_protocol_status_code_e swimcu_event_query(
 	return s_code;
 }
 
+/************
+ *
+ * Name:     mci_appl_watchdog_start
+ *
+ * Purpose:  To start a watchdog timer on MCU
+ *
+ * Parms:    swimcup - pointer to the swimcu data object
+ *           timeout - watchdog timeout valeu
+ *           delay   - time delay after watchdog timer expires and
+ *                     before the device is resetted.
+ *
+ * Return:   MCI_PROTOCOL_STATUS_CODE_SUCCESS if successful;
+ *           other status code otherwise.
+ *
+ * Abort:    none
+ *
+ ************/
+enum mci_protocol_status_code_e mci_appl_watchdog_start(
+  struct swimcu *swimcup,
+  u32 timeout,
+  u32 delay)
+{
+	enum mci_protocol_status_code_e s_code;
+	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
+	uint8_t  count = MCI_PROTOCOL_TIMER_WATCHDOG_PARAMS_COUNT;
+
+	/* encode operation type and parameter count in the first parameter */
+	buffer[0] = MCI_PROTOCOL_TIMER_OPTYPE_WATCHDOG;
+	buffer[0] |= ((uint32_t)MCI_PROTOCOL_TIMER_RTC_ALARM) << MCI_PROTOCOL_TIMER_SHIFT;
+	buffer[1] = timeout;
+	buffer[2] = delay;
+
+	/* Expect status code only; no returned results */
+	s_code = mci_protocol_command(swimcup, MCI_PROTOCOL_COMMAND_TAG_APPL_TIMER_SERVICE,
+		buffer, MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX, &count, 0x00);
+
+	swimcu_log(PROT, "%s: timeout=%d, reset delay=%d (status=%d)\n",
+		__func__, timeout, delay, s_code);
+
+	return s_code;
+}
+
+/************
+ *
+ * Name:     mci_appl_timer_stop
+ *
+ * Purpose:  To stop a previously started timer
+ *
+ * Parms:    swimcup - pointer to the swimcu data object.
+ *           timep   - pointer to storage for returne remaining timeout value.
+ *
+ * Return:   MCI_PROTOCOL_STATUS_CODE_SUCCESS if successful;
+ *           other status code otherwise.
+ *
+ * Abort:    none
+ *
+ ************/
+
+enum mci_protocol_status_code_e mci_appl_timer_stop(
+	struct swimcu *swimcup,
+	u32 *timep)
+{
+	enum mci_protocol_status_code_e s_code;
+	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
+	uint8_t  count = MCI_PROTOCOL_TIMER_IDLE_PARAMS_COUNT;
+
+	/* encode operation type and parameter count in the first parameter */
+	buffer[0] = MCI_PROTOCOL_TIMER_OPTYPE_IDLE;
+	buffer[0] |= ((uint32_t)MCI_PROTOCOL_TIMER_RTC_ALARM) << MCI_PROTOCOL_TIMER_SHIFT;
+
+	/* send request */
+	s_code = mci_protocol_command(swimcup, MCI_PROTOCOL_COMMAND_TAG_APPL_TIMER_SERVICE,
+		buffer, MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX, &count, 0x00);
+
+	if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		if (count != MCI_PROTOCOL_TIMER_IDLE_RESULT_COUNT)
+		{
+			pr_err("%s: Incorrect number of results returned %d (%d)",
+				__func__, count, MCI_PROTOCOL_STATUS_CODE_SUCCESS);
+			return MCI_PROTOCOL_STATUS_CODE_ENCODE_ERROR;
+		}
+
+		swimcu_log(PROT, "%s: status=%d count=%d\n", __func__, s_code, count);
+
+		*timep = buffer[1];
+	}
+	return s_code;
+}

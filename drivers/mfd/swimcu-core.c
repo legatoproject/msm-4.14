@@ -427,12 +427,18 @@ static int swimcu_process_events(struct swimcu *swimcu)
 			}
 			else if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_RESET) {
 				swimcu_log(EVENT, "%s: MCU reset source 0x%x\n", __func__, events[i].data.reset.source);
-				reset_recovery(swimcu);
+				if (events[i].data.reset.source != MCI_PROTOCOL_RESET_SRC_EMBEDDED_WATCHDOG) {
+					reset_recovery(swimcu);
+				}
 				swimcu_set_reset_source(events[i].data.reset.source);
 			}
 			else if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_WUSRC) {
 				swimcu_log(EVENT, "%s: MCU wakeup source %d 0x%x\n", __func__, events[i].data.wusrc.type, events[i].data.wusrc.value);
 				swimcu_set_wakeup_source(events[i].data.wusrc.type, events[i].data.wusrc.value);
+			}
+			else if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_WATCHDOG) {
+				swimcu_log(EVENT, "%s: MCU watchdog timeout, reset delay %d\n", __func__, events[i].data.watchdog.delay);
+				swimcu_watchdog_event_handle(swimcu, events[i].data.watchdog.delay);
 			}
 			else {
 				pr_warn("%s: Unknown event[%d] type %d\n", __func__, i, events[i].type);
@@ -700,6 +706,22 @@ int swimcu_device_init(struct swimcu *swimcu)
 	{
 		dev_err(swimcu->dev, "Cannot update optional sysfs\n");
 		goto exit;
+	}
+
+	if (swimcu->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_WATCHDOG) {
+		if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG)) {
+			if (0 != swimcu_pm_sysfs_init(swimcu, SWIMCU_FUNC_FLAG_WATCHDOG)) {
+				dev_err(swimcu->dev, "WATCHDOG sysfs init failed\n");
+				goto exit;
+			}
+			swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_WATCHDOG;
+		}
+	}
+	else {
+		if (swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG) {
+			swimcu_pm_sysfs_remove(swimcu, SWIMCU_FUNC_FLAG_WATCHDOG);
+			swimcu->driver_init_mask &= ~SWIMCU_DRIVER_INIT_WATCHDOG;
+		}
 	}
 
 	if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_FW)) {
