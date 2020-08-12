@@ -417,9 +417,10 @@ static int swimcu_process_events(struct swimcu *swimcu)
 		/* handle the events */
 		for (i = 0; i < count; i++) {
 			if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_GPIO) {
-				swimcu_log(EVENT, "%s: GPIO callback for port %d pin %d value %d\n", __func__,
+				swimcu_log(EVENT, "%s: GPIO IRQ event for port %d pin %d value %d\n", __func__,
 					events[i].data.gpio_irq.port, events[i].data.gpio_irq.pin, events[i].data.gpio_irq.level);
-				swimcu_gpio_callback(swimcu, events[i].data.gpio_irq.port, events[i].data.gpio_irq.pin, events[i].data.gpio_irq.level);
+				swimcu_gpio_irq_event_handle(swimcu, events[i].data.gpio_irq.port,
+					events[i].data.gpio_irq.pin, events[i].data.gpio_irq.level);
 			}
 			else if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_ADC) {
 				swimcu_log(EVENT, "%s: ADC completed callback for channel %d: value=%d\n", __func__,
@@ -690,7 +691,8 @@ int swimcu_device_init(struct swimcu *swimcu)
 
 	if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_PING)) {
 		/* first communication with MCU since statup */
-		swimcu_gpio_retrieve(swimcu); /* get gpio config from MCU */
+		/* initialize SWIMCU-GPIO module config cache from MCU (no irq handling) */
+		swimcu_gpio_module_init(swimcu, NULL);
 		swimcu_pm_data_restore(swimcu);
 		swimcu_pm_rtc_restore(swimcu);
 	}

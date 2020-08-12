@@ -153,15 +153,20 @@ static const struct pin_trigger_map {
 	{MCI_PIN_IRQ_LOGIC_ONE,    "high"},
 };
 
+/* Enumerated index into wakeup source configuration table.
+*  GPIO must be enumerated first: the wakeup source configuration/
+*  recovery operation relies on this ordering.
+*/
 enum wusrc_index {
-	WUSRC_INVALID = -1,
-	WUSRC_MIN = 0,
-	WUSRC_GPIO36 = WUSRC_MIN,
-	WUSRC_GPIO38 = 1,
-	WUSRC_TIMER = 2,
-	WUSRC_ADC2 = 3,
-	WUSRC_ADC3 = 4,
-	WUSRC_MAX = WUSRC_ADC3,
+	WUSRC_INVALID  = -1,
+	WUSRC_MIN      = 0,
+	WUSRC_GPIO36   = WUSRC_MIN,
+	WUSRC_GPIO38   = 1,
+	WUSRC_NUM_GPIO = 2,
+	WUSRC_TIMER    = 2,
+	WUSRC_ADC2     = 3,
+	WUSRC_ADC3     = 4,
+	WUSRC_MAX      = WUSRC_ADC3,
 };
 
 static const struct wusrc_param {
@@ -197,6 +202,10 @@ static struct adc_trigger_config {
 };
 
 static uint32_t adc_interval = 0;
+
+/* SWIMCU_PM_DATA_WUSRC_GPIO_IRQS */
+static uint8_t swimcu_wusrc_gpio_irq_cfg[WUSRC_NUM_GPIO] = {MCI_PIN_IRQ_DISABLED};
+
 static char* poweroff_argv[] = {"/sbin/poweroff", NULL};
 
 #define SWIMCU_PM_WAIT_SYNC_TIME 40000
@@ -234,6 +243,88 @@ static u32 swimcu_pm_data_group[MCI_PROTOCOL_DATA_GROUP_SIZE];
 static int swimcu_lpo_calibrate_enable   = SWIMCU_DISABLE;
 static u32 swimcu_lpo_calibrate_mcu_time = SWIMCU_CALIBRATE_TIME_DEFAULT;
 static struct timespec swimcu_calibrate_start_tv;
+
+/*****************************
+* Wakeup sourc configuration *
+******************************/
+/************
+*
+* Name:     swimcu_pm_wusrc_gpio_irq_set
+*
+* Purpose:  Set IRQ type of a specific MCU GPIO (as a ULPM wakeup source)
+*
+* Parms:    index - index of the GPIO for which IRQ type to be set
+*           irq   - IRQ type to be set
+*
+* Return:   0 if successful; -1 otherwise
+*
+* Abort:    none
+*
+************/
+int swimcu_pm_wusrc_gpio_irq_set(
+	enum swimcu_gpio_index index,
+	enum mci_pin_irqc_type_e irq)
+{
+	int ret = 0;
+
+	switch (index)
+	{
+		case SWIMCU_GPIO_PTA0:
+
+			swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO36] = 0xFF & irq;
+			break;
+
+		case SWIMCU_GPIO_PTB0:
+
+			swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO38] = 0xFF & irq;
+			break;
+
+		default:
+
+			ret= -1;
+	}
+
+	return ret;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_gpio_irq_get
+*
+* Purpose:  Get configured IRQ type of a specific MCU GPIO (as wakeup source)
+*
+* Parms:    index - index of the GPIO for which IRQ type to be returned
+*
+* Return:   configured IRQ type if successful; MCI_PIN_IRQ_DISABLED otherwise.
+*
+* Abort:    none
+*
+************/
+static enum mci_pin_irqc_type_e swimcu_pm_wusrc_gpio_irq_get(
+	enum swimcu_gpio_index index)
+{
+	enum mci_pin_irqc_type_e irq;
+
+	switch (index)
+	{
+		case SWIMCU_GPIO_PTA0:
+
+			irq = (enum mci_pin_irqc_type_e) swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO36];
+			break;
+
+		case SWIMCU_GPIO_PTB0:
+
+			irq = (enum mci_pin_irqc_type_e) swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO38];
+			break;
+
+		default:
+
+			irq = MCI_PIN_IRQ_DISABLED;
+	}
+
+	return irq;
+}
+
 
 /************
 *
@@ -975,20 +1066,16 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		for( wi = 0; wi < ARRAY_SIZE(wusrc_param); wi++ ) {
 			if( wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS ) {
 				gpio = wusrc_param[wi].id;
-				if (swimcu_gpio_get_trigger(gpio) != MCI_PIN_IRQ_DISABLED) { /* configured for wakeup */
-					ext_gpio = SWIMCU_GPIO_TO_SYS(gpio);
-					ret = gpio_request(ext_gpio, KBUILD_MODNAME);
+				if (swimcu_pm_wusrc_gpio_irq_get(gpio) != MCI_PIN_IRQ_DISABLED)
+				{
+					ret = swimcu_gpio_set(swimcu,
+						SWIMCU_GPIO_SET_EDGE, gpio, swimcu_pm_wusrc_gpio_irq_get(gpio));
 					if (ret < 0) {
-						swimcu_log(PM, "%s: %d in use\n", __func__, ext_gpio);
-						ret = swimcu_gpio_set(swimcu, SWIMCU_GPIO_NOOP, gpio, 0);
-						if (ret < 0) {
-							pr_err("%s: irqc set fail %d\n", __func__, gpio);
-							goto wu_fail;
-						}
+						pr_err("%s: irqc set fail %d\n", __func__, gpio);
+						goto wu_fail;
 					}
-					else {
-						swimcu_log(PM, "%s: request %d\n", __func__, ext_gpio);
-					}
+
+					swimcu_log(PM, "%s: configure GPIO %d as wakeup source \n",__func__, gpio);
 					wu_pin_bits |= wusrc_param[wi].mask;
 					gpio_cnt++;
 				}
@@ -1200,7 +1287,7 @@ wu_fail:
 	for( wi = 0; wi < ARRAY_SIZE(wusrc_param); wi++ ) {
 		if( wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS ) {
 			gpio = wusrc_param[wi].id;
-			if (swimcu_gpio_get_trigger(gpio) !=  MCI_PIN_IRQ_DISABLED) {
+			if (swimcu_pm_wusrc_gpio_irq_get(gpio) !=  MCI_PIN_IRQ_DISABLED) {
 				/* configured for wakeup */
 				ext_gpio = SWIMCU_GPIO_TO_SYS(gpio);
 				gpio_free(ext_gpio);
@@ -1247,7 +1334,7 @@ static ssize_t pm_gpio_attr_show(
 		return -EINVAL;
 	}
 
-	irqc_type = swimcu_gpio_get_trigger(gpio);
+	irqc_type = swimcu_pm_wusrc_gpio_irq_get(gpio);
 
 	for (ti = ARRAY_SIZE(pin_trigger) - 1; ti > 0; ti--) {
 		/* if never found we exit at ti == 0: "off" */
@@ -1283,14 +1370,20 @@ static ssize_t pm_gpio_attr_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
-	for (ti = ARRAY_SIZE(pin_trigger) - 1; ti >= 0; ti--) {
-	/* if never found we exit at ti == -1: invalid */
-		if (sysfs_streq(buf, pin_trigger[ti].name)) {
-			if (swimcu_gpio_set_trigger(gpio, pin_trigger[ti].type) < 0) {
-				swimcu_log(PM, "%s: failed gpio %d\n", __func__, gpio);
+	for (ti = ARRAY_SIZE(pin_trigger) - 1; ti >= 0; ti--)
+	{
+		/* if never found we exit at ti == -1: invalid */
+		if (sysfs_streq(buf, pin_trigger[ti].name))
+		{
+			if (0 != swimcu_gpio_irq_support_check(gpio))
+			{
+				pr_err("%s: IRQ not supported on gpio%d\n", __func__, gpio);
 				return -EPERM;
 			}
+
+			swimcu_pm_wusrc_gpio_irq_set(gpio, pin_trigger[ti].type);
 			wusrc_value[wi].triggered = 0;
+
 			swimcu_log(PM, "%s: setting gpio %d to trigger %d\n", __func__, gpio, ti);
 			break;
 		}

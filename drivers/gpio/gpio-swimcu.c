@@ -32,8 +32,6 @@ struct swimcu_gpio_data {
 	struct gpio_chip gpio_chip;
 };
 
-enum mci_pin_irqc_type_e gpio_irq_cfg[SWIMCU_NUM_GPIO_IRQ] = {MCI_PIN_IRQ_DISABLED};
-
 static inline struct swimcu *to_swimcu(struct gpio_chip *chip)
 {
 	struct swimcu_gpio_data *swimcu_gpio = container_of(chip, struct swimcu_gpio_data, gpio_chip);
@@ -185,40 +183,33 @@ static int swimcu_to_irq(struct gpio_chip *chip, unsigned gpio)
 	return ret;
 }
 
-static struct gpio_chip template_chip = {
-	.label			= "swimcu",
-	.owner			= THIS_MODULE,
-	.request    		= swimcu_gpio_request,
-	.free       		= swimcu_gpio_free,
-	.direction_input	= swimcu_gpio_set_direction_in,
-	.get			= swimcu_gpio_get_value,
-	.direction_output	= swimcu_gpio_set_direction_out,
-	.set			= swimcu_gpio_set_value,
-	.pull_up    		= swimcu_gpio_set_pull_up,
-	.pull_down  		= swimcu_gpio_set_pull_down,
-	.to_irq		  	= swimcu_to_irq,
-	.can_sleep		= true,
+static struct gpio_chip swimcu_gpio_chip = {
+	.label            = "swimcu",
+	.owner            = THIS_MODULE,
+	.request          = swimcu_gpio_request,
+	.free             = swimcu_gpio_free,
+	.direction_input  = swimcu_gpio_set_direction_in,
+	.get              = swimcu_gpio_get_value,
+	.direction_output = swimcu_gpio_set_direction_out,
+	.set              = swimcu_gpio_set_value,
+	.pull_up          = swimcu_gpio_set_pull_up,
+	.pull_down        = swimcu_gpio_set_pull_down,
+	.to_irq           = swimcu_to_irq,
+	.can_sleep        = true,
 };
 
-void swimcu_gpio_work(struct swimcu *swimcu, enum swimcu_gpio_irq_index irq)
+bool swimcu_gpio_irq_work(struct swimcu *swimcu, enum swimcu_gpio_irq_index irq)
 {
-	int gpio = swimcu_get_gpio_from_irq(irq);
-	int result;
-
-	if (irq < 0 || irq >= SWIMCU_NUM_GPIO_IRQ) {
+	/* validate the input */
+	if (irq < 0 || irq >= SWIMCU_NUM_GPIO_IRQ)
+	{
 		pr_err("%s: Invalid IRQ: %d\n", __func__, irq);
-		return;
+		return false;
 	}
 
 	handle_nested_irq(swimcu->gpio_irq_base + irq);
-	result = swimcu_gpio_set_trigger(gpio, gpio_irq_cfg[irq]);
-	if (result < 0) {
-		pr_err("%s: gpio%d error result=%d\n", __func__, gpio, result);
-	}
-	else {
-		/* need to refresh gpio configs to apply trigger settings */
-		swimcu_gpio_refresh(swimcu);
-	}
+
+	return true;
 }
 
 static inline int sys_irq_to_swimcu_irq(struct swimcu *swimcu, int irq)
@@ -236,43 +227,44 @@ static void swimcu_irq_lock(struct irq_data *data)
 static void swimcu_irq_sync_unlock(struct irq_data *data)
 {
 	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
+	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
+	int gpio = swimcu_get_gpio_from_irq(swimcu_irq);
+	enum mci_pin_irqc_type_e irq_type;
+	int result;
 
 	mutex_unlock(&swimcu->gpio_irq_lock);
-	swimcu_gpio_refresh(swimcu);
+
+	/* Configure remote MCU GPIO with the latest IRQ type */
+
+	irq_type = swimcu_gpio_irq_cfg_get(swimcu_irq);
+	result = swimcu_gpio_set(swimcu, SWIMCU_GPIO_SET_EDGE, gpio, irq_type);
+	if (result < 0)
+	{
+		pr_err("%s: failed for gpio%d result=%d\n", __func__, gpio, result);
+	}
+	else
+	{
+		swimcu_log(GPIO, "%s: gpio%d irq type %d\n", __func__, gpio, irq_type);
+	}
 }
 
 static void swimcu_irq_disable(struct irq_data *data)
 {
 	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
 	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
-	int gpio = swimcu_get_gpio_from_irq(swimcu_irq);
-	enum mci_pin_irqc_type_e irq_type;
-	int result;
 
-	/* We can't directly mask interrupts on the MCU,
-	* so save the current trigger config then set it to disabled */
-	irq_type = swimcu_gpio_get_trigger(gpio);
-	result = swimcu_gpio_set_trigger(gpio, MCI_PIN_IRQ_DISABLED);
-	if(result < 0) {
-		pr_err("%s: gpio%d error result=%d\n", __func__, gpio, result);
-	}
-	else {
-		gpio_irq_cfg[swimcu_irq] = irq_type;
-	}
+	/* Set IRQ type as DISABLED. The actual action is delayed in
+	*  swimcu_irq_sync_unlock() for executing in the correct context.
+	*/
+	(void)swimcu_gpio_irq_cfg_set(swimcu_irq, MCI_PIN_IRQ_DISABLED);
+
+	swimcu_log(GPIO, "%s: disable irq%d\n", __func__, swimcu_irq);
 }
 
 static void swimcu_irq_enable(struct irq_data *data)
 {
-	struct swimcu *swimcu = irq_data_get_irq_chip_data(data);
-	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
-	int gpio = swimcu_get_gpio_from_irq(swimcu_irq);
-	int result;
+	swimcu_log(GPIO, "%s: delay the action for correct context\n", __func__);
 
-	/* restore saved trigger config */
-	result = swimcu_gpio_set_trigger(gpio, gpio_irq_cfg[swimcu_irq]);
-	if (result < 0) {
-		pr_err("%s: gpio%d error result=%d\n", __func__, gpio, result);
-	}
 }
 
 static int swimcu_irq_set_type(struct irq_data *data, unsigned int type)
@@ -281,8 +273,15 @@ static int swimcu_irq_set_type(struct irq_data *data, unsigned int type)
 	int swimcu_irq = sys_irq_to_swimcu_irq(swimcu, data->irq);
 	int gpio = swimcu_get_gpio_from_irq(swimcu_irq);
 	enum mci_pin_irqc_type_e irq_type;
-	int result;
+	int err;
 
+	err = swimcu_gpio_irq_support_check(gpio);
+	if (err)
+	{
+		return err;
+	}
+
+	/* map from SYS IRQ to SWIMCU IRQ type */
 	switch (type)
 	{
 		case IRQ_TYPE_LEVEL_LOW:
@@ -304,23 +303,17 @@ static int swimcu_irq_set_type(struct irq_data *data, unsigned int type)
 			irq_type = MCI_PIN_IRQ_DISABLED;
 	}
 
-	result = swimcu_gpio_set_trigger(gpio, irq_type);
-	if(result < 0) {
-		pr_err("%s: gpio%d error result=%d\n", __func__, gpio, result);
-	}
-	else {
-		gpio_irq_cfg[swimcu_irq] = irq_type;
-	}
-	return result;
+	/* Save the IRQ type, to be enabled in swimcu_irq_sync_unlock() */
+	return swimcu_gpio_irq_cfg_set(swimcu_irq, (int)irq_type);
 }
 
 static struct irq_chip swimcu_irq_chip = {
-	.name			= "swimcu-irq",
-	.irq_bus_lock		= swimcu_irq_lock,
-	.irq_bus_sync_unlock	= swimcu_irq_sync_unlock,
-	.irq_disable		= swimcu_irq_disable,
-	.irq_enable		= swimcu_irq_enable,
-	.irq_set_type		= swimcu_irq_set_type,
+	.name                = "swimcu-irq",
+	.irq_bus_lock        = swimcu_irq_lock,
+	.irq_bus_sync_unlock = swimcu_irq_sync_unlock,
+	.irq_disable         = swimcu_irq_disable,
+	.irq_enable          = swimcu_irq_enable,
+	.irq_set_type        = swimcu_irq_set_type,
 };
 
 void swimcu_irq_init(struct swimcu *swimcu, int irq_base)
@@ -371,16 +364,17 @@ static int swimcu_gpio_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	swimcu_gpio = devm_kzalloc(&pdev->dev, sizeof(*swimcu_gpio),
-				   GFP_KERNEL);
+	swimcu_gpio = devm_kzalloc(&pdev->dev, sizeof(*swimcu_gpio), GFP_KERNEL);
 	if (swimcu_gpio == NULL)
 		return -ENOMEM;
 
 	swimcu_gpio->swimcu = swimcu;
-	swimcu_gpio->gpio_chip = template_chip;
+	swimcu_gpio->gpio_chip = swimcu_gpio_chip;
 	swimcu_gpio->gpio_chip.ngpio = pdata->nr_gpio;
 	swimcu_gpio->gpio_chip.parent = &pdev->dev;
 	swimcu_gpio->gpio_chip.base = pdata->gpio_base;
+
+	swimcu_gpio_module_init(swimcu, swimcu_gpio_irq_work);
 
 	ret = gpiochip_add(&swimcu_gpio->gpio_chip);
 	if (ret < 0) {
@@ -409,10 +403,10 @@ static int swimcu_gpio_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver swimcu_gpio_driver = {
-	.driver.name	= "swimcu-gpio",
-	.driver.owner	= THIS_MODULE,
-	.probe		= swimcu_gpio_probe,
-	.remove		= swimcu_gpio_remove,
+	.driver.name  = "swimcu-gpio",
+	.driver.owner = THIS_MODULE,
+	.probe        = swimcu_gpio_probe,
+	.remove       = swimcu_gpio_remove,
 };
 
 static int __init swimcu_gpio_init(void)

@@ -18,13 +18,20 @@
 
 #include <linux/platform_device.h>
 
-#define SWIMCU_GPIO_NOOP	0
-#define SWIMCU_GPIO_GET_DIR	1
-#define SWIMCU_GPIO_SET_DIR	2
-#define SWIMCU_GPIO_GET_VAL	3
-#define SWIMCU_GPIO_SET_VAL	4
-#define SWIMCU_GPIO_SET_PULL	5
-#define SWIMCU_GPIO_SET_EDGE	6
+#define SWIMCU_GPIO_NOOP        0
+#define SWIMCU_GPIO_GET_DIR     1
+#define SWIMCU_GPIO_SET_DIR     2
+#define SWIMCU_GPIO_GET_VAL     3
+#define SWIMCU_GPIO_SET_VAL     4
+#define SWIMCU_GPIO_GET_PULL    5
+#define SWIMCU_GPIO_SET_PULL    6
+#define SWIMCU_GPIO_GET_EDGE    7
+#define SWIMCU_GPIO_SET_EDGE    8
+
+#define SWIMCU_GPIO_PULL_NONE   0
+#define SWIMCU_GPIO_PULL_DOWN   1
+/*      SWIMCU_GPIO_PULL_KEEP   2  Not supported */
+#define SWIMCU_GPIO_PULL_UP     3
 
 /*
  * GPIO Port index.
@@ -35,10 +42,10 @@ enum swimcu_gpio_index
 {
 	SWIMCU_GPIO_FIRST = 0,
 	SWIMCU_GPIO_PTA0 = SWIMCU_GPIO_FIRST, /* GPIO36 */
-	SWIMCU_GPIO_PTA2, /* GPIO37 */
-	SWIMCU_GPIO_PTB0, /* GPIO38 */
-	SWIMCU_GPIO_PTA6, /* GPIO40 */
-	SWIMCU_GPIO_PTA5, /* GPIO41 */
+	SWIMCU_GPIO_PTA2,                     /* GPIO37 */
+	SWIMCU_GPIO_PTB0,                     /* GPIO38 */
+	SWIMCU_GPIO_PTA6,                     /* GPIO40 */
+	SWIMCU_GPIO_PTA5,                     /* GPIO41 */
 	SWIMCU_GPIO_LAST = SWIMCU_GPIO_PTA5,
 	SWIMCU_NUM_GPIO = SWIMCU_GPIO_LAST+1,
 	SWIMCU_GPIO_INVALID = SWIMCU_NUM_GPIO,
@@ -52,8 +59,14 @@ enum swimcu_gpio_irq_index
 	SWIMCU_NUM_GPIO_IRQ
 };
 
+struct swimcu;
+
+struct swimcu_gpio {
+	struct platform_device *pdev;
+};
+
 /*
- * MCU GPIO map port/pin to gpio index.
+ * MCU GPIO map port/pin and irq to gpio index.
  */
 enum swimcu_gpio_index swimcu_get_gpio_from_port_pin(int port, int pin);
 
@@ -61,13 +74,7 @@ enum swimcu_gpio_index swimcu_get_gpio_from_irq(enum swimcu_gpio_irq_index irq);
 
 enum swimcu_gpio_irq_index swimcu_get_irq_from_gpio(enum swimcu_gpio_index gpio);
 
-struct swimcu;
-
-struct swimcu_gpio {
-	struct platform_device *pdev;
-};
-
-void swimcu_gpio_callback(struct swimcu *swimcu, int port, int pin, int level);
+enum swimcu_gpio_index swimcu_get_gpio_from_port_pin(int port, int pin);
 
 int swimcu_gpio_open(struct swimcu *swimcu, int gpio);
 
@@ -75,17 +82,34 @@ int swimcu_gpio_close(struct swimcu *swimcu, int gpio);
 
 void swimcu_gpio_refresh( struct swimcu *swimcu );
 
-void swimcu_gpio_retrieve( struct swimcu *swimcu );
-
 int swimcu_gpio_get(struct swimcu *swimcu, int action, int gpio, int *value);
 
 int swimcu_gpio_set(struct swimcu *swimcu, int action, int gpio, int value);
 
 #ifndef CONFIG_MSM_SWI_QEMU
-void swimcu_gpio_work(struct swimcu *swimcu, enum swimcu_gpio_irq_index irq);
+/* IRQ-related interface */
+int swimcu_gpio_irq_support_check(enum swimcu_gpio_index gpio);
+
+int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq, int type);
+
+int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq);
+
+void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int level);
+
+void swimcu_gpio_module_init(struct swimcu *,
+	bool (*irq_handler)(struct swimcu *, enum swimcu_gpio_irq_index));
 #else
-/* This function doesn't exist for QEMU - just fake it. */
-static inline void swimcu_gpio_work(struct swimcu *swimcu, enum swimcu_gpio_irq_index irq) {}
+/* These functions do not exist for QEMU - just fake it. */
+static inline int swimcu_gpio_irq_support_check(enum swimcu_gpio_index gpio) { return 0; }
+
+static inline int swimcu_gpio_irq_cfg_set(enum swimcu_gpio_irq_index irq, int type) { return 0; }
+
+static inline int swimcu_gpio_irq_cfg_get(enum swimcu_gpio_irq_index irq) { return 0; }
+
+static inline void swimcu_gpio_irq_event_handle(struct swimcu *swimcu, int port, int pin, int level) {}
+
+static inline void swimcu_gpio_module_init(struct swimcu *,
+	bool (*irq_handler)(struct swimcu *, enum swimcu_gpio_irq_index)) {}
 #endif
 
 #endif
