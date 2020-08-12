@@ -169,9 +169,9 @@ struct swimcu {
 
 	struct kobject pm_boot_source_kobj;
 	struct kobject pm_firmware_kobj;
-	struct kobject pm_boot_source_adc_kobj;
-	struct kobject pm_psm_kobj;
+	struct kobject pm_boot_source_adc_kobj;	
 	struct kobject pm_watchdog_kobj;
+	struct kobject pm_psm_kobj;
 
 	/* Client devices */
 	struct swimcu_gpio gpio;

@@ -736,7 +736,12 @@ enum mci_protocol_status_code_e swimcu_ping(struct swimcu *swimcu)
 	struct mci_protocol_packet_s packet;
 	uint32_t params[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
 
-	mutex_lock(&swimcu->mcu_transaction_mutex);	
+	mutex_lock(&swimcu->mcu_transaction_mutex);
+
+	swimcu->version_major = 0;
+	swimcu->version_minor = 0;
+	swimcu->target_dev_id = 0;
+	swimcu->opt_func_mask = 0x0;
 
 	/* Ping the micro-controller and wait for response */
 	frame.type = MCI_PROTOCOL_FRAME_TYPE_PING_REQ;

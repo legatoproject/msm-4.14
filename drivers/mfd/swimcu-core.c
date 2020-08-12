@@ -708,20 +708,10 @@ int swimcu_device_init(struct swimcu *swimcu)
 		goto exit;
 	}
 
-	if (swimcu->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_WATCHDOG) {
-		if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG)) {
-			if (0 != swimcu_pm_sysfs_init(swimcu, SWIMCU_FUNC_FLAG_WATCHDOG)) {
-				dev_err(swimcu->dev, "WATCHDOG sysfs init failed\n");
-				goto exit;
-			}
-			swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_WATCHDOG;
-		}
-	}
-	else {
-		if (swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG) {
-			swimcu_pm_sysfs_remove(swimcu, SWIMCU_FUNC_FLAG_WATCHDOG);
-			swimcu->driver_init_mask &= ~SWIMCU_DRIVER_INIT_WATCHDOG;
-		}
+	if (0 != swimcu_pm_sysfs_opt_update(swimcu))
+	{
+		dev_err(swimcu->dev, "Cannot update optional sysfs\n");
+		goto exit;
 	}
 
 	if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_FW)) {

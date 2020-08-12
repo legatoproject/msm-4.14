@@ -32,8 +32,8 @@
 #define SWIMCU_WATCHDOG_TIMEOUT_MAX          (4294967) /* (2^32-1)/1000 */
 #define SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT  1         /* second */
 
-#define SWIMCU_WATCHDOG_OFF                  0
-#define SWIMCU_WATCHDOG_ON                   1
+#define SWIMCU_DISABLE                       0
+#define SWIMCU_ENABLE                        1
 
 /* generate extra debug logs */
 #ifdef SWIMCU_DEBUG
@@ -183,7 +183,7 @@ static char* poweroff_argv[] = {"/sbin/poweroff", NULL};
 static int swimcu_pm_state = PM_STATE_IDLE;
 
 /* MCU watchdog configuration */
-static int swimcu_watchdog_enable  = SWIMCU_WATCHDOG_OFF;
+static int swimcu_watchdog_enable  = SWIMCU_DISABLE;
 static u32 swimcu_watchdog_timeout = SWIMCU_WATCHDOG_TIMEOUT_INVALID;
 static u32 swimcu_watchdog_reset_delay = SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT;
 static u32 swimcu_watchdog_renew_count = 0;
@@ -494,11 +494,11 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 
 	}
 
-	if (swimcu_watchdog_enable == SWIMCU_WATCHDOG_ON)
+	if (swimcu_watchdog_enable == SWIMCU_ENABLE)
 	{
 		rc = mci_appl_timer_stop(swimcu, &time_ms);
 		if (rc == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
-			swimcu_watchdog_enable = SWIMCU_WATCHDOG_OFF;
+			swimcu_watchdog_enable = SWIMCU_DISABLE;
 			watchdog_disabled = true;
 			swimcu_log(PM, "%s: Watchdog timer stopped with remaining time %d\n",
 				__func__, time_ms);
@@ -577,7 +577,7 @@ wu_fail:
 		rc = mci_appl_watchdog_start(swimcu,
 			swimcu_watchdog_timeout * 1000, swimcu_watchdog_reset_delay * 1000);
 		if (rc == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
-			swimcu_watchdog_enable = SWIMCU_WATCHDOG_ON;
+			swimcu_watchdog_enable = SWIMCU_ENABLE;
 			swimcu_log(PM, "%s: Watchdog timer restarted\n", __func__);
 		}
 		else
@@ -745,20 +745,8 @@ static ssize_t version_show(
 {
 	struct swimcu *swimcu = container_of(kobj, struct swimcu, pm_firmware_kobj);
 
-	(void) swimcu_ping(swimcu);
-
-	if (swimcu->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_WATCHDOG) {
-		if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG)) {
-			if (0 == swimcu_pm_sysfs_init(swimcu, SWIMCU_FUNC_FLAG_WATCHDOG)) {
-				swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_WATCHDOG;
-			}
-		}
-	}
-	else {
-		if (swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG) {
-			swimcu_pm_sysfs_remove(swimcu, SWIMCU_FUNC_FLAG_WATCHDOG);
-			swimcu->driver_init_mask &= ~SWIMCU_DRIVER_INIT_WATCHDOG;
-		}
+	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == swimcu_ping(swimcu)) {
+	  (void) swimcu_pm_sysfs_opt_update(swimcu);
 	}
 
 	return scnprintf(buf, PAGE_SIZE, "%03d.%03d\n", swimcu->version_major, swimcu->version_minor);
@@ -936,12 +924,12 @@ static ssize_t swimcu_watchdog_enable_attr_store(struct kobject *kobj,
 		goto WATCHDOG_ENABLE_EXIT;
 	}
 
-	if ((tmp != SWIMCU_WATCHDOG_OFF) && (tmp != SWIMCU_WATCHDOG_ON)) {
+	if ((tmp != SWIMCU_DISABLE) && (tmp != SWIMCU_ENABLE)) {
 		ret = -ERANGE;
 		goto WATCHDOG_ENABLE_EXIT;
 	}
 
-	if (tmp == SWIMCU_WATCHDOG_OFF) {
+	if (tmp == SWIMCU_DISABLE) {
 		s_code = mci_appl_timer_stop(swimcup, &time_ms);
 		if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
 			pr_err("%s: Watchdog timer stopped with remaining time %d\n",
@@ -1038,7 +1026,7 @@ void swimcu_watchdog_event_handle(struct swimcu *swimcup, u32 delay)
 		return;
 	}
 
-	if (swimcu_watchdog_enable == SWIMCU_WATCHDOG_OFF) {
+	if (swimcu_watchdog_enable == SWIMCU_DISABLE) {
 		pr_err("%s: Ignore an event for disabled MCU watchdog \n", __func__);
 		return;
 	}
@@ -1518,6 +1506,39 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		kobject_uevent(&swimcu->pm_watchdog_kobj, KOBJ_ADD);
 	}
 
+	if (func_flags & SWIMCU_FUNC_FLAG_PSM) {
+		ret = kobject_init_and_add(&swimcu->pm_psm_kobj, &ktype, module_kobj, "psm");
+		if (ret) {
+			pr_err("%s: cannot create PSM kobject\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_support_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create PSM sync support node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_select_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create PSM sync select node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_enable_attr.attr);
+		if (ret) {
+			pr_err("%s: cannot create PSM sync enable node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		kobject_uevent(&swimcu->pm_psm_kobj, KOBJ_ADD);
+	}
+
+
 	swimcu_log(INIT, "%s: success func=0x%x\n", __func__, func_flags);
 	return 0;
 
@@ -1529,7 +1550,7 @@ sysfs_add_exit:
 
 /************
 *
-* Name:     swimcu_pm_sysfs_remove
+* Name:     swimcu_pm_opt_sysfs_remove
 *
 * Purpose:  Remove specific sysfs tree(s) under /sys/module/swimcu_pm
 *
@@ -1545,7 +1566,7 @@ sysfs_add_exit:
 * Abort:    none
 *
 ************/
-void swimcu_pm_sysfs_remove(struct swimcu *swimcup, int func_flags)
+static void swimcu_pm_opt_sysfs_remove(struct swimcu *swimcup, int func_flags)
 {
 	struct kobject *module_kobj;
 
@@ -1553,6 +1574,21 @@ void swimcu_pm_sysfs_remove(struct swimcu *swimcup, int func_flags)
 	if (!module_kobj)
 	{
 		pr_err("%s: cannot find kobject for module %s\n", __func__, KBUILD_MODNAME);
+	}
+
+	if (func_flags & SWIMCU_FUNC_FLAG_WATCHDOG) {
+
+		swimcu_log(INIT, "%s: remove WATCHDOG sysfs nodes\n", __func__);
+
+		kobject_uevent(&swimcup->pm_watchdog_kobj, KOBJ_REMOVE);
+
+		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_timeout_attr.attr);
+		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_reset_delay_attr.attr);
+		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_renew_count_attr.attr);
+		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_enable_attr.attr);
+
+		/* unlink kobject from hierarchy. */
+		kobject_del(&swimcup->pm_watchdog_kobj);
 	}
 
 	if (func_flags & SWIMCU_FUNC_FLAG_PSM) {
@@ -1566,24 +1602,6 @@ void swimcu_pm_sysfs_remove(struct swimcu *swimcup, int func_flags)
 		sysfs_remove_file(&swimcup->pm_psm_kobj, &swimcu_psm_enable_attr.attr);
 
 		kobject_del(&swimcup->pm_psm_kobj);
-	}
-	else if (func_flags & SWIMCU_FUNC_FLAG_WATCHDOG) {
-
-		swimcu_log(INIT, "%s: remove WATCHDOG sysfs tree\n", __func__);
-
-		kobject_uevent(&swimcup->pm_watchdog_kobj, KOBJ_REMOVE);
-
-		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_timeout_attr.attr);
-		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_reset_delay_attr.attr);
-		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_renew_count_attr.attr);
-		sysfs_remove_file(&swimcup->pm_watchdog_kobj, &swimcu_watchdog_enable_attr.attr);
-
-		/* unlink kobject from hierarchy. */
-		kobject_del(&swimcup->pm_watchdog_kobj);
-	}
-	else
-	{
-		pr_err("%s: sysfs tree not removed for function 0x%X\n", __func__, func_flags);
 	}
 }
 
@@ -1605,7 +1623,23 @@ int swimcu_pm_sysfs_opt_update(struct swimcu *swimcup)
 {
 	int ret = 0;
 
-	swimcu_log(INIT, "%s: driver_init_mask=0x%x opt_func_mask=0x%x\n", __func__, swimcup->driver_init_mask, swimcup->opt_func_mask);
+	if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_WATCHDOG) {
+		if (!(swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG)) {
+			ret = swimcu_pm_sysfs_init(swimcup, SWIMCU_FUNC_FLAG_WATCHDOG);
+			if (0 == ret) {
+				swimcup->driver_init_mask |= SWIMCU_DRIVER_INIT_WATCHDOG;
+			} else {
+				dev_err(swimcup->dev, "WATCHDOG sysfs init failed\n");
+				return ret;
+			}
+		}
+	} else {
+		if (swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG) {
+			swimcu_pm_opt_sysfs_remove(swimcup, SWIMCU_FUNC_FLAG_WATCHDOG);
+			swimcup->driver_init_mask &= ~SWIMCU_DRIVER_INIT_WATCHDOG;
+		}
+	}
+
 	if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_ALL) {
 		if (!(swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_PSM)) {
 			ret = swimcu_pm_sysfs_init(swimcup, SWIMCU_FUNC_FLAG_PSM);
@@ -1618,10 +1652,11 @@ int swimcu_pm_sysfs_opt_update(struct swimcu *swimcup)
 		}
 	} else {
 		if (swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_PSM) {
-			swimcu_pm_sysfs_remove(swimcup, SWIMCU_FUNC_FLAG_PSM);
+			swimcu_pm_opt_sysfs_remove(swimcup, SWIMCU_FUNC_FLAG_PSM);
 			swimcup->driver_init_mask &= ~SWIMCU_DRIVER_INIT_PSM;
 		}
 	}
 
 	return 0;
 }
+
