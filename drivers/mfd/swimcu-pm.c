@@ -46,16 +46,13 @@
 
 #define SWIMCU_CALIBRATE_TIME_MIN            15000    /* milliseconds */
 #define SWIMCU_CALIBRATE_TIME_MAX            60000    /* milliseconds */
-#define SWIMCU_CALIBRATE_TIME_DEFAULT        25000    /* milliseconds */
+#define SWIMCU_CALIBRATE_TIME_DEFAULT        30000    /* milliseconds */
 
-/* The precision of the calibrate result is truncated by this factor
-*  to avoid overflow in calculation of user-input time conversion
-*  (expect max 10% deviation for the MCU LPO 1K clock).
-*/
-#define SWIMCU_CALIBRATE_TRUNCATE_FACTOR     50
+#define SWIMCU_CALIBRATE_MDM2MCU             1
+#define SWIMCU_CALIBRATE_MCU2MDM             -1
 
 /* The MCU timer timeout value is trimmed off by this percentage
-*  to migigate possible deviation for the MCU LPO 1K clock over
+*  to mitigate possible deviation for the MCU LPO 1K clock over
 *  temerature (expect max 1.5%).
 */
 #define SWIMCU_CALIBRATE_TEMPERATURE_FACTOR  2       /* percent */
@@ -619,6 +616,62 @@ static int swimcu_pm_wusrc_adc_select_get(enum swimcu_adc_index index)
 
 /************
 *
+* Name:     swimcu_calibrate_data_get
+*
+* Purpose:  To get calibration data for MDM/MCU time conversion
+*
+* Parms:    swimcup       - pointer to the swimcu data object
+*           cal_dir       - calibrate direction (MDM2MCU or MCU2MDM)
+*           cal_time      - time interval to be calibrated
+*           cal_mdm_timep - pointer to storage for reuturned calibrate MDM time
+*           cal_mcu_timep - pointer to storage for reuturned calibrate MCU time
+*
+* Return:   none (always successful)
+*
+* Note:     Expensive 64-bit division on 32-bit machine is prohibited in kernel.
+*           The calibrate result is truncated by a factor to avoid possible
+*           overflow in 32-bit multiplication during time conversion. To achieve
+*           max precision, this truncation factor is calculated based on the
+*           input time to be converted and the direction of the conversion.
+*
+* Abort:    none
+*
+************/
+static void swimcu_calibrate_data_get(
+	struct swimcu *swimcup,
+	int cal_dir,
+	u32 cal_time,
+	u32 *cal_mdm_timep,
+	u32 *cal_mcu_timep)
+{
+	u32 factor;
+
+	mutex_lock(&swimcup->calibrate_mutex);
+
+	/* Calculate the minimal truncation factor; add 1 to avoid overflow in conversion */
+	if (cal_dir == SWIMCU_CALIBRATE_MDM2MCU)
+	{
+		factor = swimcup->calibrate_mcu_time;
+	}
+	else if (cal_dir == SWIMCU_CALIBRATE_MCU2MDM)
+	{
+		factor = swimcup->calibrate_mdm_time;
+	}
+	else
+	{
+		factor = max(swimcup->calibrate_mdm_time, swimcup->calibrate_mcu_time);
+	}
+	factor = cal_time / (U32_MAX / factor) + 1;
+
+	/* scale down the calibration data proportionally by the calculated factor */
+	*cal_mdm_timep = swimcup->calibrate_mdm_time / factor;
+	*cal_mcu_timep = swimcup->calibrate_mcu_time / factor;
+
+	mutex_unlock(&swimcup->calibrate_mutex);
+}
+
+/************
+*
 * Name:     swimcu_mdm_sec_to_mcu_time_ms
 *
 * Purpose:  Convert mdm time (in seconds) to equivalent MCU time in millisecond
@@ -635,23 +688,23 @@ static u32 swimcu_mdm_sec_to_mcu_time_ms(
 	struct swimcu *swimcup,
 	u32 mdm_time)
 {
-	u32 mcu_time, remainder;
+	u32 mcu_time, remainder, cal_mcu_time, cal_mdm_time;
 
-	pr_info("%s: mdm time=%u seconds to be calibrated %d/%d\n", __func__,
-		mdm_time, swimcup->calibrate_mcu_time, swimcup->calibrate_mdm_time);
+	swimcu_calibrate_data_get(swimcup,
+		SWIMCU_CALIBRATE_MDM2MCU, mdm_time, &cal_mdm_time, &cal_mcu_time);
 
-	mutex_lock(&swimcup->calibrate_mutex);
-	mdm_time *= swimcup->calibrate_mcu_time;
-	mcu_time = mdm_time / swimcup->calibrate_mdm_time; /* seconds */
+	pr_info("%s: mdm time=%u seconds to be calibrated %d/%d\n",
+		__func__, mdm_time, cal_mcu_time, cal_mdm_time);
+
+	mdm_time *= cal_mcu_time;
+
+	mcu_time = mdm_time / cal_mdm_time;            /* seconds */
+	mcu_time *= MSEC_PER_SEC;                      /* milliseconds */
 
 	/* keep millisecond precision on MCU side */
-	remainder = mdm_time % swimcup->calibrate_mdm_time;
-	remainder *= MSEC_PER_SEC;                          /* milliseconds */
-	remainder = mdm_time / swimcup->calibrate_mdm_time; /* milliseconds*/
-
-	mutex_unlock(&swimcup->calibrate_mutex);
-
-	mcu_time *= MSEC_PER_SEC;                           /* milliseconds */
+	remainder = mdm_time % cal_mdm_time;
+	remainder *= MSEC_PER_SEC;                     /* milliseconds */
+	remainder /= cal_mdm_time;                     /* milliseconds*/
 
 	pr_info("%s: mcu time %u ms + remainder time %u ms = %u ms\n",
 		__func__, mcu_time, remainder, mcu_time + remainder);
@@ -682,6 +735,7 @@ static bool swimcu_lpo_calibrate_calc(struct swimcu *swimcup, u32 mcu_time)
 	{
 		pr_err("%s: calibration time too short %d (%d)\n",
 			__func__, mcu_time, SWIMCU_CALIBRATE_TIME_MIN);
+		return false;
 	}
 
 	getrawmonotonic(&stop_tv);
@@ -710,12 +764,9 @@ static bool swimcu_lpo_calibrate_calc(struct swimcu *swimcup, u32 mcu_time)
 	}
 
 	mutex_lock(&swimcup->calibrate_mutex);
-
-	/* Truncated calibration results to prevent overflow in conversion */
-	swimcup->calibrate_mdm_time = mdm_time / SWIMCU_CALIBRATE_TRUNCATE_FACTOR;
-	swimcup->calibrate_mcu_time = mcu_time / SWIMCU_CALIBRATE_TRUNCATE_FACTOR;
+	swimcup->calibrate_mdm_time = mdm_time;
+	swimcup->calibrate_mcu_time = mcu_time;
 	swimcu_lpo_calibrate_mcu_time = mcu_time;
-
 	mutex_unlock(&swimcup->calibrate_mutex);
 
 	swimcu_log(INIT, "%s: MCU time=%d vs MDM time=%d \n", __func__, mcu_time, mdm_time);
@@ -1094,8 +1145,7 @@ swimcu_pm_psm_sync_option_default(
 ************/
 static u32 swimcu_pm_psm_time_get(void)
 {
-	unsigned long rtc_secs, alarm_secs;
-	u32 interval;
+	unsigned long rtc_secs, alarm_secs, interval;
 	struct rtc_wkalrm rtc_alarm;
 	struct rtc_time   rtc_time;
 	struct rtc_device *rtc = alarmtimer_get_rtcdev();
@@ -1127,7 +1177,7 @@ static u32 swimcu_pm_psm_time_get(void)
 	if (alarm_secs > rtc_secs)
 	{
 		interval = alarm_secs - rtc_secs;
-		pr_info("%s: alarm %lu rtc %lu interval %u", __func__, alarm_secs, rtc_secs, interval);
+		pr_info("%s: alarm %lu rtc %lu interval %lu", __func__, alarm_secs, rtc_secs, interval);
 	}
 	else
 	{
@@ -1135,7 +1185,7 @@ static u32 swimcu_pm_psm_time_get(void)
 		pr_err("%s: invalid configuration alarm %lu rtc %lu", __func__, alarm_secs, rtc_secs);
 	}
 
-	return interval;
+	return (u32)interval;
 }
 
 
@@ -1203,7 +1253,7 @@ static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 {
 	enum mci_protocol_status_code_e s_code;
 	enum mci_protocol_pm_psm_sync_option_e sync_opt;
-	u32 ulpm_time;
+	u32 ulpm_time_sec, ulpm_time_ms, remainder, cal_mdm_time, cal_mcu_time;
 	struct timespec tv;
 	int ret;
 
@@ -1216,14 +1266,15 @@ static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 	{
 		/* restore the calibration data */
 		mutex_lock(&swimcup->calibrate_mutex);
-		swimcup->calibrate_mcu_time =
-			swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME];
+		swimcu_lpo_calibrate_mcu_time =
+			swimcup->calibrate_mcu_time =
+				swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME];
 		swimcup->calibrate_mdm_time =
 			swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME];
 		mutex_unlock(&swimcup->calibrate_mutex);
 	}
 
-	s_code = swimcu_appl_psm_duration_get(swimcup, &ulpm_time, &sync_opt);
+	s_code = swimcu_appl_psm_duration_get(swimcup, &ulpm_time_ms, &sync_opt);
 	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code)
 	{
 		pr_err("%s: failed to get ULPM duration: %d\n", __func__, s_code);
@@ -1239,29 +1290,38 @@ static void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 		return;
 	}
 
-	pr_info("%s: MCUFW elapsed PSM tme: %d\n", __func__, ulpm_time);
-	if (ulpm_time == 0)
+	pr_info("%s: MCUFW elapsed PSM tme: %dms\n", __func__, ulpm_time_ms);
+	if (ulpm_time_ms == 0)
 	{
-		pr_err("%s: invalid PSM elapsed time: %d\n", __func__, ulpm_time);
+		pr_err("%s: nil PSM elapsed time\n", __func__);
 		return;
 	}
 
-	/* converted from MCU time to MDM time (milliseconds) */
-	ulpm_time *= swimcup->calibrate_mdm_time;
-	ulpm_time /= swimcup->calibrate_mcu_time;
+	/* Split elapsed ULPM time into seconds and milliseconds to avoid overflow */
+	ulpm_time_sec = ulpm_time_ms / MSEC_PER_SEC;
+	ulpm_time_ms %= MSEC_PER_SEC;
 
-	pr_info("%s ULPM duration converted to MDM time scale: %d ms\n", __func__, ulpm_time);
+	swimcu_calibrate_data_get(swimcup,
+		SWIMCU_CALIBRATE_MCU2MDM, ulpm_time_sec, &cal_mdm_time, &cal_mcu_time);
 
-	/* pre-psm rtc stored on MCU */
-	tv.tv_sec = ulpm_time / MSEC_PER_SEC;
-	tv.tv_nsec = (ulpm_time % MSEC_PER_SEC) * NSEC_PER_MSEC;
+	/* Convert "seconds" portion of elapsed ULPM duration */
+	ulpm_time_sec *= cal_mdm_time;
+	remainder     = ulpm_time_sec % cal_mcu_time;
+	ulpm_time_sec = ulpm_time_sec / cal_mcu_time;
 
-	pr_err("%s ULPM duration converted to MDM time scale: %lu s %lu ns\n",
-		__func__, tv.tv_sec, tv.tv_nsec);
+	/* Convert "milliseconds" portion, plus remainder from the "seconds" portion */
+	ulpm_time_ms = (ulpm_time_ms * cal_mdm_time) + remainder * MSEC_PER_SEC;
+	ulpm_time_ms = ulpm_time_ms / cal_mcu_time;
 
-	tv.tv_sec += swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME];
+	pr_info("%s ULPM duration in MDM time scale: %u s %u ms\n",
+		__func__, ulpm_time_sec, ulpm_time_ms);
 
-	pr_info("%s updated post-PSM RTC: %lu sec\n", __func__, tv.tv_sec);
+	/* Final post-ULPM system time */
+	tv.tv_sec = swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME] + ulpm_time_sec;
+	tv.tv_nsec = ulpm_time_ms * NSEC_PER_MSEC;
+	pr_info("%s  pre-PSM sys_time: %u sec\n",
+		__func__, swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME]);
+	pr_info("%s post-PSM sys_time: %ld sec\n", __func__, tv.tv_sec);
 
 	ret = do_settimeofday(&tv);
 	if (ret == 0)
@@ -1750,8 +1810,8 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 
 	if (SWIMCU_ENABLE == swimcu_lpo_calibrate_enable)
 	{
-		pr_err("%s: MCU LPO calibration in process\n", __func__);
-		return -EIO;
+		/* stop the LPO calibration; continue the ULPM entry process */
+		(void)swimcu_lpo_calibrate_do_enable(swimcu, SWIMCU_DISABLE);
 	}
 
 	swimcu_log(PM, "%s: process pm option %d\n", __func__, pm);
@@ -3089,11 +3149,11 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		kobject_uevent(&swimcu->pm_calibrate_kobj, KOBJ_ADD);
 
-		/* start the calibration if its data cannot be retieved from MCU */
-		if ((swimcu->calibrate_mcu_time == SWIMCU_CALIBRATE_DATA_DEFAULT) &&
-			(swimcu->calibrate_mdm_time == SWIMCU_CALIBRATE_DATA_DEFAULT))
+		/* start the calibration if previous calibration duration shorter than ideal */
+		if (swimcu->calibrate_mcu_time < SWIMCU_CALIBRATE_TIME_DEFAULT)
 		{
-			ret = swimcu_lpo_calibrate_do_enable(swimcu, true);
+			swimcu_lpo_calibrate_mcu_time = SWIMCU_CALIBRATE_TIME_DEFAULT;
+			ret = swimcu_lpo_calibrate_do_enable(swimcu, SWIMCU_ENABLE);
 			if (ret)
 			{
 				pr_err("%s: Failed to start MCU timer calibration %d\n", __func__, ret);
