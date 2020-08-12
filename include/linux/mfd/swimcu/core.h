@@ -65,6 +65,7 @@ enum swimcu_adc_compare_mode
 #define SWIMCU_FUNC_FLAG_EVENT       (1 << 2)
 #define SWIMCU_FUNC_FLAG_WATCHDOG    (1 << 3)
 #define SWIMCU_FUNC_FLAG_PSM         (1 << 4)
+#define SWIMCU_FUNC_FLAG_CALIBRATE   (1 << 5)
 
 #define SWIMCU_FUNC_APPL             (SWIMCU_FUNC_FLAG_FWUPD | \
                                       SWIMCU_FUNC_FLAG_PM |    \
@@ -77,6 +78,7 @@ enum swimcu_adc_compare_mode
 
 
 #define SWIMCU_FUNC_OPTIONAL         (SWIMCU_FUNC_FLAG_WATCHDOG | \
+                                      SWIMCU_FUNC_FLAG_CALIBRATE | \
                                       SWIMCU_FUNC_FLAG_PSM)
 
 #define SWIMCU_DRIVER_INIT_FIRST     0
@@ -89,6 +91,7 @@ enum swimcu_adc_compare_mode
 #define SWIMCU_DRIVER_INIT_REBOOT    (1 << 6)
 #define SWIMCU_DRIVER_INIT_WATCHDOG  (1 << 7)
 #define SWIMCU_DRIVER_INIT_PSM       (1 << 8)
+#define SWIMCU_DRIVER_INIT_CALIBRATE (1 << 9)
 
 #define SWIMCU_DEBUG
 
@@ -156,6 +159,10 @@ struct swimcu {
 	u8 target_dev_id;
 	u16 opt_func_mask;
 
+	u32 calibrate_mcu_time;
+	u32 calibrate_mdm_time;
+	struct mutex calibrate_mutex;
+
 	struct mutex mcu_transaction_mutex;
 
 	struct mutex adc_mutex;
@@ -172,6 +179,7 @@ struct swimcu {
 	struct kobject pm_boot_source_adc_kobj;	
 	struct kobject pm_watchdog_kobj;
 	struct kobject pm_psm_kobj;
+	struct kobject pm_calibrate_kobj;
 
 	/* Client devices */
 	struct swimcu_gpio gpio;

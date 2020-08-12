@@ -17,7 +17,7 @@
 #include <linux/sysfs.h>
 #include <linux/kmod.h>
 #include <linux/reboot.h>
-
+#include <linux/timekeeping.h>
 #include <linux/gpio.h>
 
 #include <linux/mfd/swimcu/core.h>
@@ -27,19 +27,32 @@
 #include <linux/mfd/swimcu/mcidefs.h>
 #include <mach/swimcu.h>
 
-/* Constants for MCU watchdog feature */
-#define SWIMCU_WATCHDOG_TIMEOUT_INVALID      0
-#define SWIMCU_WATCHDOG_TIMEOUT_MAX          (4294967) /* (2^32-1)/1000 */
-#define SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT  1         /* second */
 
 #define SWIMCU_DISABLE                       0
 #define SWIMCU_ENABLE                        1
 
-/* generate extra debug logs */
-#ifdef SWIMCU_DEBUG
-module_param_named(
-	debug_mask, swimcu_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
-#endif
+/* Maximum time value allowed in configuration of MCU functionality
+*  40 days and 40 nights (in seconds).
+*/
+#define SWIMCU_MAX_TIME                      (3456000)
+
+/* MCU calibration support starts from MCUFW_002.005 */
+#define SWIMCU_CALIBRATE_SUPPORT_VER_MAJOR   2
+#define SWIMCU_CALIBRATE_SUPPORT_VER_MINOR   5
+
+#define SWIMCU_CALIBRATE_TIME_MIN            15000    /* milliseconds */
+#define SWIMCU_CALIBRATE_TIME_MAX            60000    /* milliseconds */
+#define SWIMCU_CALIBRATE_TIME_DEFAULT        25000    /* milliseconds */
+
+/* The precision of the calibrate result is truncated by this factor
+*  to avoid overflow in calculation of user-input time conversion
+*  (expect max 10% deviation for the MCU LPO 1K clock).
+*/
+#define SWIMCU_CALIBRATE_TRUNCATE_FACTOR     50
+
+/* Constants for MCU watchdog feature */
+#define SWIMCU_WATCHDOG_TIMEOUT_INVALID      0
+#define SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT  1         /* second */
 
 #define ADC_ATTR_SHOW(name)                                       	\
 	static ssize_t pm_adc_##name##_attr_show(struct kobject *kobj,  \
@@ -82,6 +95,12 @@ module_param_named(
 		return ret;						\
 	};
 
+/* generate extra debug logs */
+#ifdef SWIMCU_DEBUG
+module_param_named(
+	debug_mask, swimcu_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
+#endif
+
 /* modem power state in low power mode, default off */
 static int swimcu_pm_mdm_pwr = MCI_PROTOCOL_MDM_STATE_OFF;
 module_param_named(
@@ -123,11 +142,6 @@ static const struct pin_trigger_map {
 	{MCI_PIN_IRQ_EITHER_EDGE,  "both"},
 	{MCI_PIN_IRQ_LOGIC_ONE,    "high"},
 };
-
-#define MAX_WAKEUP_TIME (4294967) /* 2^32 / 1000 */
-static uint32_t wakeup_time = 0;
-
-static int pm_enable = SWIMCU_PM_OFF;
 
 enum wusrc_index {
 	WUSRC_INVALID = -1,
@@ -180,6 +194,10 @@ static char* poweroff_argv[] = {"/sbin/poweroff", NULL};
 #define PM_STATE_IDLE     0
 #define PM_STATE_SYNC     1
 #define PM_STATE_SHUTDOWN 2
+
+/* Power management configuration */
+static u32 swimcu_wakeup_time = 0;
+static int swimcu_pm_enable = SWIMCU_PM_OFF;
 static int swimcu_pm_state = PM_STATE_IDLE;
 
 /* MCU watchdog configuration */
@@ -189,10 +207,177 @@ static u32 swimcu_watchdog_reset_delay = SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT;
 static u32 swimcu_watchdog_renew_count = 0;
 
 /* MCU psm support configuration */
-static uint32_t swimcu_psm_time = 0;
+static u32 swimcu_psm_time = 0;
 static int swimcu_psm_enable = 0;
 static enum mci_protocol_pm_psm_sync_option_e
                 swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
+
+/* SYSFS support for MCU 1K LPO clock calibration */
+static int swimcu_lpo_calibrate_enable   = SWIMCU_DISABLE;
+static u32 swimcu_lpo_calibrate_mcu_time = SWIMCU_CALIBRATE_TIME_DEFAULT;
+static struct timespec swimcu_calibrate_start_tv;
+
+/************
+*
+* Name:     swimcu_lpo_calibrate_calc
+*
+* Purpose:  Calculate the MCU LPO calibration result
+*
+* Parms:    swimcup  - pointer to the swimcu data object
+*           mcu_time - actual mcu time elapsed
+*
+* Return:   true if successful;
+*           false if MDM time changed during calibration
+*
+* Abort:    none
+*
+************/
+static bool swimcu_lpo_calibrate_calc(struct swimcu *swimcup, u32 mcu_time)
+{
+	u32 mdm_time, delta;
+	struct timespec stop_tv;
+
+	if (mcu_time < SWIMCU_CALIBRATE_TIME_MIN)
+	{
+		pr_err("%s: calibration time too short %d (%d)\n",
+			__func__, mcu_time, SWIMCU_CALIBRATE_TIME_MIN);
+	}
+
+	getrawmonotonic(&stop_tv);
+	swimcu_log(PM, "%s: MCU calibrate start: %ld.%09ld stop: %ld.%09ld\n", __func__,
+		swimcu_calibrate_start_tv.tv_sec, swimcu_calibrate_start_tv.tv_nsec,
+		stop_tv.tv_sec, stop_tv.tv_nsec);
+
+	mdm_time = stop_tv.tv_sec - swimcu_calibrate_start_tv.tv_sec;
+	mdm_time *= MSEC_PER_SEC;
+	mdm_time += (stop_tv.tv_nsec - swimcu_calibrate_start_tv.tv_nsec) / NSEC_PER_MSEC;
+
+	/* Throw away bogus data (exceeds max MCU LPO frequency deviation) */
+	if (mdm_time >  mcu_time)
+	{
+		delta = mdm_time - mcu_time;
+	}
+	else
+	{
+		delta = mcu_time - mdm_time;
+	}
+
+	if (delta > (mcu_time / 10))
+	{
+		pr_err("%s: bogus data MCU time=%d vs MDM time=%d \n", __func__, mcu_time, mdm_time);
+		return false;
+	}
+
+	mutex_lock(&swimcup->calibrate_mutex);
+
+	/* Truncated calibration results to prevent overflow in conversion */
+	swimcup->calibrate_mdm_time = mdm_time / SWIMCU_CALIBRATE_TRUNCATE_FACTOR;
+	swimcup->calibrate_mcu_time = mcu_time / SWIMCU_CALIBRATE_TRUNCATE_FACTOR;
+	swimcu_lpo_calibrate_mcu_time = mcu_time;
+
+	mutex_unlock(&swimcup->calibrate_mutex);
+
+	swimcu_log(INIT, "%s: MCU time=%d vs MDM time=%d \n", __func__, mcu_time, mdm_time);
+	return true;
+}
+
+/************
+*
+* Name:     swimcu_lpo_calibrate_do_enable
+*
+* Purpose:  Enable/Disable LPO calibration
+*
+* Parms:    swimcup - pointer to the swimcu data object
+*           enable  - Boolean flag to indicate enable/disable LPO calibration
+*
+* Return:   0 if success;
+*           -EPERM if the specific enable/disable operation has already performed.
+*           -EINVAL if calibration time is not valid;
+*           -EIO if fails to communicate with MCU
+*
+* Abort:    none
+*
+************/
+static int swimcu_lpo_calibrate_do_enable(struct swimcu *swimcup, bool enable)
+{
+	enum mci_protocol_status_code_e s_code;
+	enum mci_protocol_hw_timer_state_e timer_state;
+	u32 remainder;
+
+	if (enable == swimcu_lpo_calibrate_enable)
+	{
+		if (swimcu_lpo_calibrate_enable == SWIMCU_DISABLE)
+		{
+			pr_err("%s: MCU LDO calibrate already stopped\n", __func__);
+		}
+		else
+		{
+			pr_err("%s: MCU LDO calibrate already started\n", __func__);
+		}
+		return -EPERM;
+	}
+
+	if (enable == SWIMCU_DISABLE)
+	{
+		s_code = mci_appl_timer_stop(swimcup, &timer_state, &remainder);
+		if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			pr_err("%s: cannot send command to stop MCU timer status=%d\n", __func__, s_code);
+
+			/* Reset the state variable to allow next calibration after recovery */
+			swimcu_lpo_calibrate_enable = SWIMCU_DISABLE;
+			return -EIO;
+		}
+
+		if (timer_state == MCI_PROTOCOL_HW_TIMER_STATE_IDLE)
+		{
+			swimcu_log(PM, "%s: calibration timer has already expired\n", __func__);
+			/* Too late to stop the calibration: do nothing.
+			*  A calibrate event is expected to be delivered and processed.
+			*/
+		}
+		else
+		{
+			if (timer_state == MCI_PROTOCOL_HW_TIMER_STATE_CALIBRATE_RUNNING)
+			{
+				(void)swimcu_lpo_calibrate_calc(swimcup, (swimcu_lpo_calibrate_mcu_time - remainder));
+			}
+			else
+			{
+				pr_err("%s: stopped other timer in state %d unexpectedly\n", __func__, timer_state);
+			}
+
+			/* Reset the state variable to allow next calibration after recovery */
+			swimcu_lpo_calibrate_enable = SWIMCU_DISABLE;
+		}
+	}
+	else
+	{
+		/* first set the enble flag to prevent calibrate time change */
+		swimcu_lpo_calibrate_enable = SWIMCU_ENABLE;
+
+		if (swimcu_lpo_calibrate_mcu_time < SWIMCU_CALIBRATE_TIME_MIN)
+		{
+			pr_err("%s: calibration time is too short %d (%d)\n",
+				__func__, swimcu_lpo_calibrate_mcu_time, SWIMCU_CALIBRATE_TIME_MIN);
+
+			swimcu_lpo_calibrate_enable = SWIMCU_DISABLE;
+			return -EINVAL;
+		}
+
+		s_code = mci_appl_timer_calibrate_start(swimcup, swimcu_lpo_calibrate_mcu_time);
+		if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			pr_err("%s: failed MCU command status %d\n", __func__, s_code);
+
+			swimcu_lpo_calibrate_enable = SWIMCU_DISABLE;
+			return -EIO;
+		}
+		getrawmonotonic(&swimcu_calibrate_start_tv);
+	}
+
+	return 0;
+}
 
 /************
 *
@@ -361,7 +546,7 @@ int pm_reboot_call(
 
 /************
 *
-* Name:     swimcu_pm_ulpm_enable
+* Name:     pm_set_mcu_ulpm_enable
 *
 * Purpose:  Configure MCU with triggers and enter ultra low power mode
 *
@@ -378,6 +563,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 {
 	int ret = 0;
 	enum mci_protocol_status_code_e rc;
+	enum mci_protocol_hw_timer_state_e timer_state;
 	enum wusrc_index wi;
 	struct mci_wakeup_source_config_s wu_config;
 	int gpio, ext_gpio;
@@ -399,6 +585,12 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	if (pm == SWIMCU_PM_OFF) {
 		swimcu_log(PM, "%s: disable\n", __func__);
 		return 0;
+	}
+
+	if (SWIMCU_ENABLE == swimcu_lpo_calibrate_enable)
+	{
+		pr_err("%s: MCU LPO calibration in process\n", __func__);
+		return -EIO;
 	}
 
 	if ((pm == SWIMCU_PM_BOOT_SOURCE) || (pm == SWIMCU_PM_PSM_SYNC)) {
@@ -444,9 +636,27 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 			swimcu_log(PM, "%s: wu on pins 0x%x\n", __func__, wu_pin_bits);
 		}
 
-		if (wakeup_time > 0) {
+		if (swimcu_wakeup_time > 0)
+		{
 			wu_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
-			wu_config.args.timeout = wakeup_time * 1000; /* convert to msec */
+
+			/* wakeup time has been validated upon user input (in seconds)
+			*  which garantees no overflow in the following calculation.
+			*/
+			mutex_lock(&swimcu->calibrate_mutex);
+			wu_config.args.timeout = swimcu_wakeup_time * swimcu->calibrate_mcu_time;
+
+			/* Process the remainder for milliseond precision */
+			time_ms = wu_config.args.timeout % swimcu->calibrate_mdm_time;
+			time_ms *= MSEC_PER_SEC;
+			time_ms /= swimcu->calibrate_mdm_time;
+
+			wu_config.args.timeout /= swimcu->calibrate_mdm_time;
+			mutex_unlock(&swimcu->calibrate_mutex);
+
+			wu_config.args.timeout *= MSEC_PER_SEC;
+			wu_config.args.timeout += time_ms;
+
 			if( MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
 				(rc = swimcu_wakeup_source_config(swimcu, &wu_config,
 				MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET)) ) {
@@ -455,7 +665,8 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 				goto wu_fail;
 			}
 			wu_source |= (u16)MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
-			swimcu_log(PM, "%s: wu on timer %u\n", __func__, wakeup_time);
+			swimcu_log(PM, "%s: wu on timer %u (mcu=%u)\n",
+				__func__, swimcu_wakeup_time, wu_config.args.timeout);
 		}
 
 		if (SWIMCU_ADC_INVALID != adc_wu_src) {
@@ -496,12 +707,12 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 
 	if (swimcu_watchdog_enable == SWIMCU_ENABLE)
 	{
-		rc = mci_appl_timer_stop(swimcu, &time_ms);
+		rc = mci_appl_timer_stop(swimcu, &timer_state, &time_ms);
 		if (rc == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
 			swimcu_watchdog_enable = SWIMCU_DISABLE;
 			watchdog_disabled = true;
-			swimcu_log(PM, "%s: Watchdog timer stopped with remaining time %d\n",
-				__func__, time_ms);
+			swimcu_log(PM, "%s: timer stopped in state %d with remaining time %d\n",
+				__func__, timer_state, time_ms);
 		}
 		else
 		{
@@ -668,7 +879,7 @@ static ssize_t pm_gpio_attr_store(struct kobject *kobj,
 static ssize_t pm_timer_timeout_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", wakeup_time);
+	return scnprintf(buf, PAGE_SIZE, "%u\n", swimcu_wakeup_time);
 }
 
 static ssize_t pm_timer_timeout_attr_store(struct kobject *kobj,
@@ -678,12 +889,14 @@ static ssize_t pm_timer_timeout_attr_store(struct kobject *kobj,
 	uint32_t tmp_time;
 
 	if (0 == (ret = kstrtouint(buf, 0, &tmp_time))) {
-		if (tmp_time <= MAX_WAKEUP_TIME) {
-			wakeup_time = tmp_time;
+		if (tmp_time <= SWIMCU_MAX_TIME)
+		{
+			swimcu_wakeup_time = tmp_time;
 			wusrc_value[WUSRC_TIMER].triggered = 0;
 			return count;
 		}
-		else {
+		else
+		{
 			ret = -ERANGE;
 		}
 	}
@@ -703,7 +916,7 @@ static ssize_t enable_store(struct kobject *kobj,
 
 		ret = pm_set_mcu_ulpm_enable(swimcu, tmp_enable);
 		if (0 == ret) {
-			pm_enable = tmp_enable;
+			swimcu_pm_enable = tmp_enable;
 			ret = count;
 		}
 	}
@@ -718,6 +931,9 @@ static ssize_t update_store(struct kobject *kobj,
 {
 	int ret;
 	struct swimcu *swimcu = container_of(kobj, struct swimcu, pm_firmware_kobj);
+
+	/* stop the LPO calibration before MCUFW update */
+	(void)swimcu_lpo_calibrate_do_enable(swimcu, false);
 
 	/* transition the MCU to boot mode, reset then required to continue firmware update */
 	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == swimcu_to_boot_transit(swimcu)) {
@@ -820,7 +1036,7 @@ static ssize_t pm_adc_interval_attr_store(struct kobject *kobj,
 	unsigned int interval;
 
 	if (0 == (ret = kstrtouint(buf, 0, &interval))) {
-		if (interval <= MAX_WAKEUP_TIME) {
+		if (interval <= SWIMCU_MAX_TIME) {
 			adc_interval = interval;
 			return count;
 		}
@@ -846,7 +1062,7 @@ static ssize_t swimcu_watchdog_timeout_attr_store(struct kobject *kobj,
 	uint32_t tmp_time;
 
 	if (0 == (ret = kstrtouint(buf, 0, &tmp_time))) {
-		if (tmp_time <= SWIMCU_WATCHDOG_TIMEOUT_MAX) {
+		if (tmp_time <= SWIMCU_MAX_TIME) {
 			swimcu_watchdog_timeout = tmp_time;
 			return count;
 		}
@@ -879,7 +1095,7 @@ static ssize_t swimcu_watchdog_reset_delay_attr_store(struct kobject *kobj,
 	uint32_t tmp_time;
 
 	if (0 == (ret = kstrtouint(buf, 0, &tmp_time))) {
-		if (tmp_time <= SWIMCU_WATCHDOG_TIMEOUT_MAX) {
+		if (tmp_time <= SWIMCU_MAX_TIME) {
 			swimcu_watchdog_reset_delay = tmp_time;
 			ret = count;
 		}
@@ -917,7 +1133,8 @@ static ssize_t swimcu_watchdog_enable_attr_store(struct kobject *kobj,
 	int tmp;
 	struct swimcu *swimcup = container_of(kobj, struct swimcu, pm_watchdog_kobj);
 	enum mci_protocol_status_code_e s_code;
-  u32 time_ms;
+	enum mci_protocol_hw_timer_state_e timer_state;
+	u32 time_ms;
 
 	if (0 != (ret = kstrtoint(buf, 0, &tmp))) {
 		ret = -EINVAL;
@@ -930,10 +1147,10 @@ static ssize_t swimcu_watchdog_enable_attr_store(struct kobject *kobj,
 	}
 
 	if (tmp == SWIMCU_DISABLE) {
-		s_code = mci_appl_timer_stop(swimcup, &time_ms);
+		s_code = mci_appl_timer_stop(swimcup, &timer_state, &time_ms);
 		if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS) {
-			pr_err("%s: Watchdog timer stopped with remaining time %d\n",
-				__func__, time_ms);
+			swimcu_log(PM, "%s: Watchdog timer stopped in state %d with remaining time %d\n",
+				__func__, timer_state, time_ms);
 		}
 	}
 	else {
@@ -1000,6 +1217,110 @@ static const struct kobj_attribute swimcu_watchdog_renew_count_attr = {
 	.show = &swimcu_watchdog_renew_count_attr_show,
 };
 
+static ssize_t swimcu_lpo_calibrate_mcu_time_attr_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", swimcu_lpo_calibrate_mcu_time);
+}
+
+static ssize_t swimcu_lpo_calibrate_mcu_time_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	u32 tmp;
+
+	/* calibration time interval change is not allowed during calibration */
+	if (SWIMCU_ENABLE == swimcu_lpo_calibrate_enable)
+	{
+		pr_err("%s: Calibration in process\n", __func__);
+		return -EIO;
+	}
+
+	if (0 != kstrtouint(buf, 0, &tmp))
+	{
+		return -EINVAL;
+	}
+
+	if ((tmp < SWIMCU_CALIBRATE_TIME_MIN) || (tmp > SWIMCU_CALIBRATE_TIME_MAX))
+	{
+		return -ERANGE;
+	}
+
+	swimcu_lpo_calibrate_mcu_time = tmp;
+	return count;
+}
+
+static ssize_t swimcu_lpo_calibrate_mdm_time_attr_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct swimcu *swimcup = container_of(kobj, struct swimcu, pm_calibrate_kobj);
+	u32 mdm_time = swimcu_lpo_calibrate_mcu_time;
+
+	mutex_lock(&swimcup->calibrate_mutex);
+	mdm_time *= swimcup->calibrate_mdm_time;
+	mdm_time /= swimcup->calibrate_mcu_time;
+	mutex_unlock(&swimcup->calibrate_mutex);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", mdm_time);
+}
+
+static ssize_t swimcu_lpo_calibrate_enable_attr_show(
+	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", swimcu_lpo_calibrate_enable);
+}
+
+static ssize_t swimcu_lpo_calibrate_enable_attr_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct swimcu *swimcup = container_of(kobj, struct swimcu, pm_calibrate_kobj);
+	int tmp, ret;
+
+	if (0 != (ret = kstrtoint(buf, 0, &tmp)))
+	{
+		ret = -EINVAL;
+	}
+	else if ((tmp != SWIMCU_DISABLE) && (tmp != SWIMCU_ENABLE))
+	{
+		ret = -ERANGE;
+	}
+	else
+	{
+		ret = swimcu_lpo_calibrate_do_enable(swimcup, (bool)tmp);
+	}
+
+	if (ret < 0) {
+		pr_err("%s: input error %s ret %d\n", __func__, buf, ret);
+		return ret;
+	}
+
+	return count;
+};
+
+/* sysfs entry to access calibrate timeout configuration */
+static const struct kobj_attribute swimcu_lpo_calibrate_mcu_time_attr = {
+	.attr = {
+		.name = "mcu_time",
+		.mode = S_IRUGO | S_IWUSR | S_IWGRP },
+	.show = &swimcu_lpo_calibrate_mcu_time_attr_show,
+	.store = &swimcu_lpo_calibrate_mcu_time_attr_store,
+};
+
+static const struct kobj_attribute swimcu_lpo_calibrate_mdm_time_attr = {
+	.attr = {
+		.name = "mdm_time",
+		.mode = S_IRUGO},
+	.show = &swimcu_lpo_calibrate_mdm_time_attr_show,
+};
+
+/* sysfs entries to enable/disable MCU calibrate */
+static const struct kobj_attribute swimcu_lpo_calibrate_enable_attr = {
+	.attr = {
+		.name = "enable",
+		.mode = S_IRUGO | S_IWUSR | S_IWGRP },
+	.show = &swimcu_lpo_calibrate_enable_attr_show,
+	.store = &swimcu_lpo_calibrate_enable_attr_store,
+};
+
 /************
 *
 * Name:     swimcu_watchdog_event_handle
@@ -1021,8 +1342,8 @@ void swimcu_watchdog_event_handle(struct swimcu *swimcup, u32 delay)
 	char event_str[] = "MCU_WATCHDOG";
 	char *envp[] = { event_str, NULL };
 
-	if (pm_enable > SWIMCU_PM_OFF) {
-		pr_err("%s: ULPM (%d) requested, do not renew watchdog\n", __func__, pm_enable);
+	if (swimcu_pm_enable > SWIMCU_PM_OFF) {
+		pr_err("%s: ULPM (%d) requested, do not renew watchdog\n", __func__, swimcu_pm_enable);
 		return;
 	}
 
@@ -1048,6 +1369,44 @@ void swimcu_watchdog_event_handle(struct swimcu *swimcup, u32 delay)
 		pr_err("%s: error %d signaling uevent\n", __func__, err);
 	}
 	kobject_put(&swimcup->dev->kobj);
+}
+
+/************
+*
+* Name:     swimcu_calibrate_event_handle
+*
+* Purpose:  To handle an MCU calibrate timeout event
+*
+* Parms:    swimcu    - pointer to the SWIMCU data structure
+*           remainder - remainder of the timeout value when the timer is stopped
+*
+* Return:   Nothing
+*
+* Abort:    none
+*
+************/
+void swimcu_calibrate_event_handle(struct swimcu *swimcup, u32 remainder)
+{
+	enum mci_protocol_status_code_e s_code;
+
+	swimcu_log(INIT, "%s: MCU calibrate completed with remaining time %d\n", __func__, remainder);
+
+	if (swimcu_lpo_calibrate_calc(swimcup, swimcu_lpo_calibrate_mcu_time - remainder))
+	{
+		swimcu_lpo_calibrate_enable = SWIMCU_DISABLE;
+		return;
+	}
+
+	/* restart calibration */
+	s_code = mci_appl_timer_calibrate_start(swimcup, swimcu_lpo_calibrate_mcu_time);
+	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		pr_err("%s: failed to restart LPO calibration status=%d\n", __func__, s_code);
+		swimcu_lpo_calibrate_enable = SWIMCU_DISABLE;
+		return;
+	}
+
+	getrawmonotonic(&swimcu_calibrate_start_tv);
 }
 
 /* PSM synchronization support directory */
@@ -1243,7 +1602,7 @@ static const struct kobj_attribute pm_timer_timeout_attr[] = {
 };
 
 /* sysfs entries to set boot_source enable */
-static const struct kobj_attribute pm_enable_attr = __ATTR_WO(enable);
+static const struct kobj_attribute swimcu_pm_enable_attr = __ATTR_WO(enable);
 
 /* sysfs entries to initiate firmware upgrade */
 static const struct kobj_attribute fw_update_attr = __ATTR_WO(update);
@@ -1425,7 +1784,7 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 			}
 		}
 
-		ret = sysfs_create_file(&swimcu->pm_boot_source_kobj, &pm_enable_attr.attr);
+		ret = sysfs_create_file(&swimcu->pm_boot_source_kobj, &swimcu_pm_enable_attr.attr);
 		if (ret) {
 			pr_err("%s: cannot create enable\n", __func__);
 			ret = -ENOMEM;
@@ -1465,6 +1824,55 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		}
 
 		kobject_uevent(&swimcu->pm_psm_kobj, KOBJ_ADD);
+	}
+
+	if (func_flags & SWIMCU_FUNC_FLAG_CALIBRATE)
+	{
+		ret = kobject_init_and_add(&swimcu->pm_calibrate_kobj, &ktype, module_kobj, "calibrate");
+		if (ret)
+		{
+			pr_err("%s: cannot create CALIBRATE kobject\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_lpo_calibrate_mcu_time_attr.attr);
+		if (ret)
+		{
+			pr_err("%s: cannot create CALIBRATE mcu timeout node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_lpo_calibrate_mdm_time_attr.attr);
+		if (ret)
+		{
+			pr_err("%s: cannot create CALIBRATE mdm time node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_lpo_calibrate_enable_attr.attr);
+		if (ret)
+		{
+			pr_err("%s: cannot create CALIBRATE calibrate enable node\n", __func__);
+			ret = -ENOMEM;
+			goto sysfs_add_exit;
+		}
+
+		kobject_uevent(&swimcu->pm_calibrate_kobj, KOBJ_ADD);
+
+		/* now start the calibration with default calibration time interval */
+		ret = swimcu_lpo_calibrate_do_enable(swimcu, true);
+		if (ret)
+		{
+			pr_err("%s: Failed to start MCU timer calibration %d\n", __func__, ret);
+		}
+		else
+		{
+			swimcu_log(INIT, "%s: MCU LPO calibration started %d\n",
+				__func__, swimcu_lpo_calibrate_mcu_time);
+		}
 	}
 
 	if (func_flags & SWIMCU_FUNC_FLAG_WATCHDOG) {
@@ -1622,6 +2030,25 @@ static void swimcu_pm_opt_sysfs_remove(struct swimcu *swimcup, int func_flags)
 int swimcu_pm_sysfs_opt_update(struct swimcu *swimcup)
 {
 	int ret = 0;
+
+	if ((swimcup->version_major > SWIMCU_CALIBRATE_SUPPORT_VER_MAJOR) ||
+			((swimcup->version_major == SWIMCU_CALIBRATE_SUPPORT_VER_MAJOR) &&
+			(swimcup->version_minor >= SWIMCU_CALIBRATE_SUPPORT_VER_MINOR))) {
+		if (!(swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_CALIBRATE)) {
+			ret = swimcu_pm_sysfs_init(swimcup, SWIMCU_FUNC_FLAG_CALIBRATE);
+			if (0 == ret) {
+				swimcup->driver_init_mask |= SWIMCU_DRIVER_INIT_CALIBRATE;
+			} else {
+				dev_err(swimcup->dev, "Calibrate sysfs init failed\n");
+				return ret;
+			}
+		}
+	} else {
+		if (swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_CALIBRATE) {
+			swimcu_pm_opt_sysfs_remove(swimcup, SWIMCU_FUNC_FLAG_CALIBRATE);
+			swimcup->driver_init_mask &= ~SWIMCU_FUNC_FLAG_CALIBRATE;
+		}
+	}
 
 	if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_WATCHDOG) {
 		if (!(swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_WATCHDOG)) {

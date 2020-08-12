@@ -571,6 +571,11 @@ struct mci_event_s
       uint32_t                               delay;
     } watchdog;
 
+    struct
+    {
+      uint32_t                               time;
+    } calibrate;
+
   } data;                               /* event data */
 };
 
@@ -704,10 +709,14 @@ extern enum mci_pin_irqc_type_e swimcu_gpio_get_trigger(int gpio);
  * MCU timer service
  */
 extern enum mci_protocol_status_code_e
+  mci_appl_timer_calibrate_start(struct swimcu *swimcup, u32 timeout);
+
+extern enum mci_protocol_status_code_e
   mci_appl_watchdog_start(struct swimcu *swimcup, u32 timeout, u32 delay);
 
 extern enum mci_protocol_status_code_e
-  mci_appl_timer_stop(struct swimcu *swimcup, u32 * timep);
+  mci_appl_timer_stop(struct swimcu *swimcup,
+  enum mci_protocol_hw_timer_state_e *statep, u32 * timep);
 
 
 #endif  /* MCIDEFS_H */

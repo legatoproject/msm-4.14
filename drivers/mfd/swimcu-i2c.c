@@ -176,6 +176,11 @@ static int swimcu_i2c_probe(struct i2c_client *i2c,
 	swimcu->dev = &i2c->dev;
 	swimcu->client = i2c;
 	swimcu->i2c_driver_id = id->driver_data;
+
+	mutex_init(&swimcu->calibrate_mutex);
+	swimcu->calibrate_mcu_time = 1;
+	swimcu->calibrate_mdm_time = 1;
+
 	return swimcu_device_init(swimcu);
 
 fail:

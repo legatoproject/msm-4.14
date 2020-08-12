@@ -35,6 +35,8 @@ void swimcu_set_reset_source(enum mci_protocol_reset_source_e value);
 
 void swimcu_watchdog_event_handle(struct swimcu *swimcu, u32 delay);
 
+void swimcu_calibrate_event_handle(struct swimcu *swimcup, u32 time);
+
 void wake_n_set_callback(void (*event_cb)(void));
 
 int pm_reboot_call(struct notifier_block *this, unsigned long code, void* cmd);

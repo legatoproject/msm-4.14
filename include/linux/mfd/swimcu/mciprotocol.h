@@ -1059,6 +1059,29 @@ enum mci_protocol_timer_read_input_type_e
   MCI_PROTOCOL_TIMER_READ_INPUT_ADC    = 0x02,   /* analog input  */
 };
 
+/************
+*
+* Name:     mci_protocol_hw_timer_state_e
+*
+* Purpose:  Enumerate state of an MCU hardware timer
+*
+* Members:  See below
+*
+* Notes:    The state of the HW timer are mutual exclusive
+*
+************/
+enum mci_protocol_hw_timer_state_e
+{
+  MCI_PROTOCOL_HW_TIMER_STATE_IDLE,                    /* Timer is not used */
+  MCI_PROTOCOL_HW_TIMER_STATE_WATCHDOG_RUNNING,        /* Running as a watchdog timer */
+  MCI_PROTOCOL_HW_TIMER_STATE_WATCHDOG_RENEW_WAITING,  /* Waiting for MDM to renew watchdog timer */
+  MCI_PROTOCOL_HW_TIMER_STATE_WATCHDOG_RESETTING,      /* Resetting MDM due to watchdog timeout */
+  MCI_PROTOCOL_HW_TIMER_STATE_PWROFF_SYNC_WAITING,     /* Waiting for power off SYNC from MDM */
+  MCI_PROTOCOL_HW_TIMER_STATE_ULPM_WUSRC_RUNNING,      /* Running as a wakeup source for ULPM */
+  MCI_PROTOCOL_HW_TIMER_STATE_CALIBRATE_RUNNING,       /* Running for clock calibration purpose */
+  MCI_PROTOCOL_HW_TIMER_STATE_MAX = MCI_PROTOCOL_HW_TIMER_STATE_CALIBRATE_RUNNING
+};
+
 /* No additional parameters for MCI_PROTOCOL_TIMER_OPTYPE_IDLE besides the OPTYPE.
 *  Results returned for successful MCI_PROTOCOL_TIMER_OPTYPE_IDLE command
 *  The 1st parameter encodes the usage of the stopped timer.
