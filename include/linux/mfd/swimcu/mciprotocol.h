@@ -173,7 +173,7 @@ enum mci_protocol_command_tag_e
   MCI_PROTOCOL_COMMAND_TAG_APPL_RESERVED_1              = 0xC6, /* Reserved for future use */
   MCI_PROTOCOL_COMMAND_TAG_APPL_RESERVED_2              = 0xC7, /* Reserved for future use */
   MCI_PROTOCOL_COMMAND_TAG_APPL_RESERVED_3              = 0xC8, /* Reserved for future use */
-  MCI_PROTOCOL_COMMAND_TAG_APPL_RESERVED_4              = 0xC9, /* Reserved for future use */
+  MCI_PROTOCOL_COMMAND_TAG_APPL_DATA_SERVICE            = 0xC9, /* To store/retrieve data on MCU over host power cycle */
   MCI_PROTOCOL_COMMAND_TAG_APPL_ADC_SERVICE             = 0xCA, /* To configure ADC measurement */
   MCI_PROTOCOL_COMMAND_TAG_APPL_CMP_CONFIG              = 0xCB, /* To configure analog input(s) comparison */
   MCI_PROTOCOL_COMMAND_TAG_APPL_TPM_CONFIG              = 0xCC, /* To configure Timer/PWM module */
@@ -797,15 +797,15 @@ enum mci_protocol_wakeup_source_type_e
 };
 
 /* Max 16 pins for each port */
-#define MCI_PROTCOL_PINS_PER_PORT                         16
+#define MCI_PROTOCOL_PINS_PER_PORT                        16
 
 /* bitmask representation of the external wakeup pins */
-#define MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_NONE    0x0
-#define MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0    0x00000001
-#define MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0    0x00010000
-#define MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_ALL     \
-                             (MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0 | \
-                              MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0)
+#define MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_NONE    0x0
+#define MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0    0x00000001
+#define MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0    0x00010000
+#define MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_ALL     \
+                             (MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0 | \
+                              MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0)
 
 #define MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_NONE   0x00
 #define MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTA12  0x00001000
@@ -915,6 +915,7 @@ enum mci_protocol_pm_optype_e
   MCI_PROTOCOL_PM_OPTYPE_POWER_OFF_TIME_CONFIG = 0x3,  /* to config the wait times for power off sequence */
   MCI_PROTOCOL_PM_OPTYPE_POWER_OFF_SYNC        = 0x4,  /* to synchronize the completion of power off sequence */
   MCI_PROTOCOL_PM_OPTYPE_PSM_SYNC_CONFIG       = 0x5,  /* to configure the PSM/ULPM synchronization option */
+  MCI_PROTOCOL_PM_OPTYPE_ULPM_DURATION_GET      = 0x6,  /* to get the actual elapsed time of PSM/ULPM period */
 };
 
 #define MCI_PROTOCOL_PM_SET_PARAMS_COUNT              3
@@ -982,8 +983,16 @@ enum mci_protocol_pm_optype_e
 #define MCI_PROTOCOL_PM_PSM_SYNC_CONFIG_PARAMS_COUNT        3
 #define MCI_PROTOCOL_PM_PSM_SYNC_CONFIG_RESULT_COUNT        0
 
-#define MCI_PROTOCOL_PM_PSM_SYNC_CONFIG_OPTION_MASK        0x0000FF00
+#define MCI_PROTOCOL_PM_PSM_SYNC_CONFIG_OPTION_MASK         0x0000FF00
 #define MCI_PROTOCOL_PM_PSM_SYNC_CONFIG_OPTION_SHIFT        8
+
+/* One parameter for optype in the MCI_PROTOCOL_PM_OPTYPE_ULPM_DURATION_GET
+*  request and two 32-bit values in the returned result:
+*  The first 32-bit returns the total ULPM/PSM duration.
+*  The second 32-bit returns the PSM synchronization option if applicable.
+*/
+#define MCI_PROTOCOL_PM_ULPM_DURATION_GET_PARAMS_COUNT  1
+#define MCI_PROTOCOL_PM_ULPM_DURATION_GET_RESULT_COUNT  2
 
 /************
 *
@@ -1079,7 +1088,8 @@ enum mci_protocol_hw_timer_state_e
   MCI_PROTOCOL_HW_TIMER_STATE_PWROFF_SYNC_WAITING,     /* Waiting for power off SYNC from MDM */
   MCI_PROTOCOL_HW_TIMER_STATE_ULPM_WUSRC_RUNNING,      /* Running as a wakeup source for ULPM */
   MCI_PROTOCOL_HW_TIMER_STATE_CALIBRATE_RUNNING,       /* Running for clock calibration purpose */
-  MCI_PROTOCOL_HW_TIMER_STATE_MAX = MCI_PROTOCOL_HW_TIMER_STATE_CALIBRATE_RUNNING
+  MCI_PROTOCOL_HW_TIMER_STATE_ULPM_EXIT_RUNNING,       /* Running for elapsed time after ULPM/PSM */
+  MCI_PROTOCOL_HW_TIMER_STATE_MAX = MCI_PROTOCOL_HW_TIMER_STATE_ULPM_EXIT_RUNNING
 };
 
 /* No additional parameters for MCI_PROTOCOL_TIMER_OPTYPE_IDLE besides the OPTYPE.
@@ -1130,6 +1140,50 @@ enum mci_protocol_hw_timer_state_e
 
 #define MCI_PROTOCOL_APPL_OPTYPE_MASK                   0x000000FF
 #define MCI_PROTOCOL_APPL_OPTYPE_SHIFT                  0
+
+/************
+*
+* Name:     mci_protocol_data_service_optype_e - Operation type for data service
+*
+* Purpose:  Enumerate the data service operation type
+*
+* Members:  See below
+*
+* Note:     The data are stored and retrieved in groups, starting from group 0.
+*           Each group contains five 32-bit data. There are totaol two groups
+*           on WPx5/76/77, device families.
+************/
+enum mci_protocol_data_service_optype_e
+{
+  MCI_PROTOCOL_DATA_SERVICE_OPTYPE_NONE     = 0x00,  /* Placeholder */
+  MCI_PROTOCOL_DATA_SERVICE_OPTYPE_STORE    = 0x01,  /* To store data on MCU, persistent before over host power cycle */
+  MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE = 0x02,  /* To retrieve data stored on MCU previously */
+};
+
+#define MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS                   2
+#define MCI_PROTOCOL_DATA_GROUP_SIZE                             5
+
+#define MCI_PROTOCOL_DATA_SERVICE_OPTYPE_STORE_PARAMS_COUNT      6
+#define MCI_PROTOCOL_DATA_SERVICE_OPTYPE_STORE_RESULT_COUNT      0
+
+#define MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_PARAMS_COUNT   1
+#define MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_RESULT_COUNT   5
+
+/* For both MCI_PROTOCOL_DATA_OPTYPE_* requests, the first parameter encodes
+*  optype and group number
+*    DATA_OPTYPE: bits [ 0, 7] - operation type
+*    GROUP_NUM:   bits [ 8,15] - page index
+*    RESERVED     bits [16,31] - reserved
+*  For STORE operation request, the group of five 32-bit data shall be provided.
+*  For RETRIEVE operation response, the result contains a group of five 32-bit data
+*  stored previously.
+*/
+
+#define MCI_PROTOCOL_DATA_SERVICE_OPTYPE_MASK                    0x000000FF
+#define MCI_PROTOCOL_DATA_SERVICE_OPTYPE_SHIFT                   0
+
+#define MCI_PROTOCOL_DATA_GROUP_INDEX_MASK               0x0000FF00
+#define MCI_PROTOCOL_DATA_GROUP_INDEX_SHIFT              8
 
 /************
  *

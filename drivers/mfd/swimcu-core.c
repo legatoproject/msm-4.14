@@ -691,6 +691,8 @@ int swimcu_device_init(struct swimcu *swimcu)
 	if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_PING)) {
 		/* first communication with MCU since statup */
 		swimcu_gpio_retrieve(swimcu); /* get gpio config from MCU */
+		swimcu_pm_data_restore(swimcu);
+		swimcu_pm_rtc_restore(swimcu);
 	}
 
 	swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_PING;

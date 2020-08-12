@@ -25,6 +25,10 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags);
 
 int swimcu_pm_sysfs_opt_update(struct swimcu *swimcu);
 
+void swimcu_pm_data_restore(struct swimcu *swimcu);
+
+void swimcu_pm_rtc_restore(struct swimcu *swimcup);
+
 void swimcu_pm_sysfs_deinit(struct swimcu *swimcu);
 
 void swimcu_wakeup_trigger(void);

@@ -1607,6 +1607,56 @@ enum mci_protocol_status_code_e swimcu_psm_sync_config(
 
 /************
  *
+ * Name:     swimcu_appl_psm_duration_get
+ *
+ * Purpose:  To get ULPM/PSM duration
+ *
+ * Parms:    swimcu    - pointer to the swimcu data structure
+ *           durationp - pointer to storage for returned ULPM/PSM duration
+ *           sync_optp - pointer to storage for returned PSM synchronization option
+ *
+ * Return:   MCI_PROTOCOL_STATUS_CODE_SUCCESS if successful;
+ *           other status code otherwise.
+ *
+ * Abort:    none
+ *
+ * Notes:    none
+ *
+ ************/
+enum mci_protocol_status_code_e swimcu_appl_psm_duration_get(
+	struct swimcu *swimcup,
+	uint32_t * durationp,
+	enum mci_protocol_pm_psm_sync_option_e *sync_optp)
+{
+	enum mci_protocol_status_code_e s_code;
+	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
+	uint8_t  count;
+
+	if ((sync_optp == NULL) || (durationp == NULL))
+	{
+		pr_err("%s: No storage provided for returned psm time", __func__);
+		return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
+	}
+
+	count = MCI_PROTOCOL_PM_ULPM_DURATION_GET_PARAMS_COUNT;
+	buffer[0] = (uint32_t) MCI_PROTOCOL_PM_OPTYPE_ULPM_DURATION_GET;
+
+	s_code = mci_protocol_command(swimcup, MCI_PROTOCOL_COMMAND_TAG_APPL_PM_SERVICE,
+		buffer, MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX, &count, 0x00);
+
+	if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		*durationp = buffer[0];
+		*sync_optp = (enum mci_protocol_pm_psm_sync_option_e)buffer[1];
+	}
+
+	pr_err("%s: return status %d", __func__, s_code);
+
+	return s_code;
+}
+
+/************
+ *
  * Name:     mci_appl_pm_profile_config
  *
  * Purpose:  To encode the profile configuration
@@ -1980,3 +2030,160 @@ enum mci_protocol_status_code_e mci_appl_timer_stop(
 	}
 	return s_code;
 }
+
+/************
+ *
+ * Name:     swimcu_appl_data_store
+ *
+ * Purpose:  To store a group of data on MCU
+ *
+ * Parms:    swimcup - pointer to the swimcu data object.
+ *           index  -  index of the data group
+ *           datap   - point to the 32-bit data buffer for the retrieved data
+ *           count   - number of uint32 data to be stored
+ *
+ * Return:   MCI_PROTOCOL_STATUS_CODE_SUCCESS if successful;
+ *           other status code otherwise.
+ *
+ * Note:     A group of five 32-bit data are stored for efficiency.
+ *
+ * Abort:    none
+ *
+ ************/
+enum mci_protocol_status_code_e swimcu_appl_data_store(
+	struct swimcu *swimcu,
+	uint32_t index,
+	uint32_t * datap,
+	int count)
+{
+	enum mci_protocol_status_code_e s_code;
+	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
+	int i;
+
+	if (index >= MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS)
+	{
+		pr_err("%s: incorrect group index %d (%d)",
+			__func__, index, MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS);
+		return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
+	}
+
+	if (datap == NULL)
+	{
+		pr_err("%s: NULL data point\n", __func__);
+		return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
+	}
+
+	if (count > MCI_PROTOCOL_DATA_GROUP_SIZE)
+	{
+		pr_err("%s: too many data in the group %d (%d)",
+			__func__, count, MCI_PROTOCOL_DATA_GROUP_SIZE);
+		return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
+	}
+
+	/* encode operation type and data group index in the first parameter */
+	buffer[0] = MCI_PROTOCOL_DATA_SERVICE_OPTYPE_STORE;
+	buffer[0] |= index << MCI_PROTOCOL_DATA_GROUP_INDEX_SHIFT;
+	for (i = 0; i < count; i++)
+	{
+		buffer[i+1] = datap[i];
+	}
+
+	/* send request */
+	count = MCI_PROTOCOL_DATA_SERVICE_OPTYPE_STORE_PARAMS_COUNT;
+	s_code = mci_protocol_command(swimcu, MCI_PROTOCOL_COMMAND_TAG_APPL_DATA_SERVICE,
+		buffer, MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX, (uint8_t *)(&count), 0x00);
+
+	if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		if (count != MCI_PROTOCOL_DATA_SERVICE_OPTYPE_STORE_RESULT_COUNT)
+		{
+			pr_err("%s: Incorrect number of results returned %d (%d)",
+				__func__, count, MCI_PROTOCOL_STATUS_CODE_SUCCESS);
+			return MCI_PROTOCOL_STATUS_CODE_ENCODE_ERROR;
+		}
+	}
+
+	return s_code;
+}
+
+/************
+ *
+ * Name:     swimcu_appl_data_retrieve
+ *
+ * Purpose:  To retrive a group of data strored on MCU
+ *
+ * Parms:    swimcup - pointer to the swimcu data object.
+ *           index  -  index of the data group
+ *           datap   - point to the 32-bit data buffer for the retrieved data
+ *           countp  - pointer to the storage for the number of uint32 data:
+ *                     [IN]  can be stored in the provided buffer
+ *                   - [OUT] retrieved from MCU.
+ *
+ * Return:   MCI_PROTOCOL_STATUS_CODE_SUCCESS if successful;
+ *           other status code otherwise.
+ *
+ * Note:     A group of five 32-bit data are retieved for efficiency.
+ *
+ * Abort:    none
+ *
+ ************/
+enum mci_protocol_status_code_e swimcu_appl_data_retrieve(
+	struct swimcu *swimcu,
+	uint32_t index,
+	uint32_t * datap,
+	int * countp)
+{
+	enum mci_protocol_status_code_e s_code;
+	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
+	uint8_t  count;
+
+	if (index >= MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS)
+	{
+		pr_err("%s: Incorrect group index %d (%d)",
+			__func__, index, MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS);
+		return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
+	}
+
+	if ((datap == NULL) || (countp == NULL))
+	{
+		pr_err("%s: NULL data point\n", __func__);
+		return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
+	}
+
+	if (*countp < MCI_PROTOCOL_DATA_GROUP_SIZE)
+	{
+		pr_err("%s: not enough buffer %d (%d)\n\n",
+			__func__, *countp, MCI_PROTOCOL_DATA_GROUP_SIZE);
+		return MCI_PROTOCOL_STATUS_CODE_NOT_ENOUGH_BUFFER;
+	}
+
+	/* encode operation type and data group index in the first parameter */
+	buffer[0] = MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE;
+	buffer[0] |= index << MCI_PROTOCOL_DATA_GROUP_INDEX_SHIFT;
+
+	/* send request */
+	count = MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_PARAMS_COUNT;
+	s_code = mci_protocol_command(swimcu, MCI_PROTOCOL_COMMAND_TAG_APPL_DATA_SERVICE,
+		buffer, MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX, &count, 0x00);
+
+	if (s_code == MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		if (count != MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_RESULT_COUNT)
+		{
+			pr_err("%s: Incorrect number of results returned %d (%d)",
+				__func__, count, MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_RESULT_COUNT);
+			return MCI_PROTOCOL_STATUS_CODE_ENCODE_ERROR;
+		}
+
+		count = 0;
+		while (count < MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_RESULT_COUNT)
+		{
+			datap[count] = buffer[count];
+			++count;
+		}
+		*countp = MCI_PROTOCOL_DATA_SERVICE_OPTYPE_RETRIEVE_RESULT_COUNT;
+	}
+
+	return s_code;
+}
+

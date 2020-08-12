@@ -679,6 +679,11 @@ extern enum mci_protocol_status_code_e swimcu_pm_profile_config(
                                 struct mci_pm_profile_config_s  *configp,
                                 enum   mci_protocol_pm_optype_e  optype);
 
+extern enum mci_protocol_status_code_e swimcu_appl_psm_duration_get(
+                                struct swimcu *swimcu,
+                                enum mci_protocol_pm_psm_sync_option_e *sync,
+                                uint32_t *psm_timep);
+
 extern enum mci_protocol_status_code_e swimcu_event_query(
                                 struct swimcu *swimcu,
                                 struct mci_event_s *eventp,
@@ -718,5 +723,11 @@ extern enum mci_protocol_status_code_e
   mci_appl_timer_stop(struct swimcu *swimcup,
   enum mci_protocol_hw_timer_state_e *statep, u32 * timep);
 
+
+extern enum mci_protocol_status_code_e
+  swimcu_appl_data_store(struct swimcu *swimcu, uint32_t index, uint32_t* datap, int count);
+
+extern enum mci_protocol_status_code_e
+  swimcu_appl_data_retrieve(struct swimcu *swimcu, uint32_t index, uint32_t * datap, int *data_countp);
 
 #endif  /* MCIDEFS_H */

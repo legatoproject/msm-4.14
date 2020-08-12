@@ -41,6 +41,9 @@
 #define SWIMCU_CALIBRATE_SUPPORT_VER_MAJOR   2
 #define SWIMCU_CALIBRATE_SUPPORT_VER_MINOR   5
 
+/* Default value used to initialize calibrate data */
+#define SWIMCU_CALIBRATE_DATA_DEFAULT        1
+
 #define SWIMCU_CALIBRATE_TIME_MIN            15000    /* milliseconds */
 #define SWIMCU_CALIBRATE_TIME_MAX            60000    /* milliseconds */
 #define SWIMCU_CALIBRATE_TIME_DEFAULT        25000    /* milliseconds */
@@ -166,8 +169,8 @@ static const struct wusrc_param {
 	int id;
 	uint32_t mask;
 } wusrc_param[] = {
-	[WUSRC_GPIO36] = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS, SWIMCU_GPIO_PTA0, MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0},
-	[WUSRC_GPIO38] = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS, SWIMCU_GPIO_PTB0, MCI_PROTCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0},
+	[WUSRC_GPIO36] = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS, SWIMCU_GPIO_PTA0, MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0},
+	[WUSRC_GPIO38] = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS, SWIMCU_GPIO_PTB0, MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0},
 	[WUSRC_TIMER]  = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER, 0, 0},
 	[WUSRC_ADC2]   = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC, SWIMCU_ADC_PTA12, MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTA12},
 	[WUSRC_ADC3]   = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC, SWIMCU_ADC_PTB1, MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTB1},
@@ -217,6 +220,15 @@ static u32 swimcu_watchdog_renew_count = 0;
 static u32 swimcu_psm_active_time = 0;
 static enum mci_protocol_pm_psm_sync_option_e
                 swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
+
+#define SWIMCU_PM_DATA_GROUP_INDEX_0              0
+#define SWIMCU_PM_DATA_INDEX_CALIBRATE_MDM_TIME   0
+#define SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME   1
+#define SWIMCU_PM_DATA_INDEX_EXPECTED_ULPM_TIME   2
+#define SWIMCU_PM_DATA_INDEX_PRE_ULPM_RTC_TIME    3
+#define SWIMCU_PM_DATA_INDEX_RESERVED             4
+
+static u32 swimcu_pm_data_group[MCI_PROTOCOL_DATA_GROUP_SIZE];
 
 /* SYSFS support for MCU 1K LPO clock calibration */
 static int swimcu_lpo_calibrate_enable   = SWIMCU_DISABLE;
@@ -654,6 +666,40 @@ int pm_panic_call(
 	return NOTIFY_DONE;
 }
 
+/************
+*
+* Name:     swimcu_pm_psm_sync_option_default
+*
+* Purpose:  To get default PSM synchronization option supported by MCU
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   Default PSMsynchronization option
+*
+* Abort:    none
+*
+************/
+static enum mci_protocol_pm_psm_sync_option_e
+swimcu_pm_psm_sync_option_default(
+	struct swimcu *swimcup)
+{
+	if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_3)
+	{
+		return MCI_PROTOCOL_PM_PSM_SYNC_OPTION_C;
+	}
+	else if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_2)
+	{
+		return MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B;
+	}
+	else if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_1)
+	{
+		return MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A;
+	}
+	else
+	{
+		return MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
+	}
+}
 
 /************
 *
@@ -675,19 +721,30 @@ static u32 swimcu_pm_psm_time_get(void)
 	struct rtc_wkalrm rtc_alarm;
 	struct rtc_time   rtc_time;
 	struct rtc_device *rtc = alarmtimer_get_rtcdev();
+	int ret;
 
 	if (!rtc)
 	{
-		pr_err("%s: faile to get RTC device", __func__);
+		pr_err("%s: failed to get RTC device\n", __func__);
 		return 0;
 	}
 
 	/* retrieve configured RTC time and RTC Alarm settings; convert to seconds */
-	rtc_read_alarm(rtc, &rtc_alarm);
-	rtc_tm_to_time(&rtc_alarm.time, &alarm_secs);
+	ret = rtc_read_alarm(rtc, &rtc_alarm);
+	if (ret)
+	{
+		pr_err("%s: failed to read alarm ret=%d\n", __func__, ret);
+		return 0;
+	}
+	(void)rtc_tm_to_time(&rtc_alarm.time, &alarm_secs);
 
-	rtc_read_time(rtc, &rtc_time);
-	rtc_tm_to_time(&rtc_time, &rtc_secs);
+	ret = rtc_read_time(rtc, &rtc_time);
+	if (ret)
+	{
+		pr_err("%s: failed to read time ret=%d\n", __func__, ret);
+		return 0;
+	}
+	(void)rtc_tm_to_time(&rtc_time, &rtc_secs);
 
 	if (alarm_secs > rtc_secs)
 	{
@@ -701,6 +758,157 @@ static u32 swimcu_pm_psm_time_get(void)
 	}
 
 	return interval;
+}
+
+/************
+*
+* Name:     swimcu_pm_data_store
+*
+* Purpose:  To store data on MCU persistent across PSM/ULPM cycle
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   none
+*
+* Abort:    none
+*
+************/
+void swimcu_pm_data_store(struct swimcu *swimcup)
+{
+	enum mci_protocol_status_code_e s_code;
+	struct timeval tv;
+
+	/* Save MCU clock calibration data */
+	mutex_lock(&swimcup->calibrate_mutex);
+	swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MDM_TIME] =
+		swimcup->calibrate_mdm_time;
+	swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME] =
+		swimcup->calibrate_mcu_time;
+	mutex_unlock(&swimcup->calibrate_mutex);
+
+	/* Save pre-ULPM RTC clock */
+	tv.tv_sec = 0;
+	do_gettimeofday(&tv);
+	tv.tv_sec += (tv.tv_usec + USEC_PER_SEC/2)/USEC_PER_SEC;
+	swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_PRE_ULPM_RTC_TIME] = tv.tv_sec;
+	pr_info("%s: sending persistent data to MCU\n", __func__);
+
+	s_code = swimcu_appl_data_store(swimcup,
+		SWIMCU_PM_DATA_GROUP_INDEX_0, swimcu_pm_data_group, MCI_PROTOCOL_DATA_GROUP_SIZE);
+	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		/* it may fail if MCUFW does not support the feature but continue any way */
+		pr_err("%s: failed to store data to MCU %d\n", __func__, s_code);
+	}
+}
+
+/************
+*
+* Name:     swimcu_pm_data_restore
+*
+* Purpose:  To restore previously saved data from MCU
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   none
+*
+* Abort:    none
+*
+************/
+void swimcu_pm_data_restore(struct swimcu *swimcup)
+{
+	enum mci_protocol_status_code_e s_code;
+	int count;
+
+	count = MCI_PROTOCOL_DATA_GROUP_SIZE;
+	s_code = swimcu_appl_data_retrieve(swimcup, 0, swimcu_pm_data_group, &count);
+	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	{
+		pr_err("%s: failed to retrive data stored on MCU\n", __func__);
+		return;
+	}
+
+	if (count && (swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME] != 0))
+	{
+		/* restore the calibration data */
+		mutex_lock(&swimcup->calibrate_mutex);
+		swimcup->calibrate_mcu_time =
+			swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME];
+		swimcup->calibrate_mdm_time =
+			swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MDM_TIME];
+		mutex_unlock(&swimcup->calibrate_mutex);
+	}
+}
+
+/************
+*
+* Name:     swimcu_pm_rtc_restore
+*
+* Purpose:  To restore PMIC RTC time
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   none
+*
+* Abort:    none
+*
+************/
+void swimcu_pm_rtc_restore(struct swimcu *swimcup)
+{
+	enum mci_protocol_status_code_e s_code;
+	enum mci_protocol_pm_psm_sync_option_e sync_opt;
+	u32 ulpm_time;
+	struct timespec tv;
+	int ret;
+
+	s_code = swimcu_appl_psm_duration_get(swimcup, &ulpm_time, &sync_opt);
+	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code)
+	{
+		pr_err("%s: failed to get ULPM duration: %d\n", __func__, s_code);
+		return;
+	}
+
+	swimcu_psm_sync_select = sync_opt;
+	if ((sync_opt == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A) ||
+		(sync_opt == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B))
+	{
+		pr_err("%s: no RTC recovery is required for sync option %d\n", __func__, sync_opt);
+		return;
+	}
+
+	pr_err("%s: MCUFW elapsed PSM tme: %d\n", __func__, ulpm_time);
+	if (ulpm_time == 0)
+	{
+		pr_err("%s: invalid PSM elapsed time: %d\n", __func__, ulpm_time);
+		return;
+	}
+
+	/* converted from MCU time to MDM time (milliseconds) */
+	ulpm_time *= swimcup->calibrate_mdm_time;
+	ulpm_time /= swimcup->calibrate_mcu_time;
+
+	pr_err("%s ULPM duration converted to MDM time scale: %d ms\n", __func__, ulpm_time);
+
+	/* pre-psm rtc stored on MCU */
+	tv.tv_sec = ulpm_time / MSEC_PER_SEC;
+	tv.tv_nsec = (ulpm_time % MSEC_PER_SEC) * NSEC_PER_MSEC;
+
+	pr_err("%s ULPM duration converted to MDM time scale: %lu s %lu ns\n",
+		__func__, tv.tv_sec, tv.tv_nsec);
+
+	tv.tv_sec += swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_PRE_ULPM_RTC_TIME];
+
+	pr_err("%s updated post-PSM RTC: %lu sec\n", __func__, tv.tv_sec);
+
+	ret = do_settimeofday(&tv);
+	if (ret == 0)
+	{
+		pr_err("%s set post-ULPM RTC\n", __func__);
+	}
+	else
+	{
+		pr_err("%s failed to set post-ULPM RTC ret=%d\n", __func__, ret);
+	}
 }
 
 /************
@@ -815,6 +1023,8 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 			wu_config.args.timeout =
 				swimcu_mdm_sec_to_mcu_time_ms(swimcu, swimcu_wakeup_time);
 
+			swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_EXPECTED_ULPM_TIME] = swimcu_wakeup_time;
+
 			if( MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
 				(rc = swimcu_wakeup_source_config(swimcu, &wu_config,
 				MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET)) )
@@ -885,19 +1095,29 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		{
 			pr_info("%s: user-selected psm sync option %d\n", __func__, swimcu_psm_sync_select);
 
+			/* select default sync option if none is specified by user */
+			if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
+			{
+				swimcu_psm_sync_select = swimcu_pm_psm_sync_option_default(swimcu);
+				if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
+				{
+					pr_err("%s: no PSM synchronization support\n", __func__);
+					ret = -EPERM;
+					goto wu_fail;
+				}
+			}
+
 			if (swimcu_psm_sync_select != MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A)
 			{
 				/* attempt to read remaining PSM time if sync option A is not specified */
 				timeout = swimcu_pm_psm_time_get();
+
+				/* save the PSM time persistent across the ULPM cycle */
+				swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_EXPECTED_ULPM_TIME] = timeout;
+
 				pr_info("%s: configured psm time %d\n", __func__, timeout);
 				if (timeout > 0)
 				{
-					/* set sync option B with non-zero PSM time */
-					if (swimcu_psm_sync_select != MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B)
-					{
-						swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B;
-					}
-
 					/* mitigate the risk of LPO clock variation over temperature */
 					timeout *= (100 - SWIMCU_CALIBRATE_TEMPERATURE_FACTOR);
 					timeout /= 100;
@@ -913,7 +1133,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 					swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A;
 				}
 			}
-			else 
+			else
 			{
 				timeout = 0;
 			}
@@ -922,27 +1142,43 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 				__func__, swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
 			rc = swimcu_psm_sync_config(swimcu,
 				swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
+			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != rc)
+			{
+				pr_err("%s: cannot config MCU for PSM synchronization %d\n", __func__, rc);
+				ret = -EIO;
+				goto wu_fail;
+			}
+
+			if (timeout > 0)
+			{
+				wu_source |= MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
+			}
+			swimcu_pm_state = PM_STATE_SYNC;
 		}
 		else
 		{
 			pr_info("%s: sending wait_time_config", __func__);
 			rc = swimcu_pm_wait_time_config(swimcu, SWIMCU_PM_WAIT_SYNC_TIME, 0);
+
+			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == rc)
+			{
+				swimcu_pm_state = PM_STATE_SYNC;
+			}
+			else if (MCI_PROTOCOL_STATUS_CODE_UNKNOWN_COMMAND == rc)
+			{
+				pr_info("%s: pm wait_time_config not recognized by MCU, \
+					proceed with legacy shutdown\n", __func__);
+				swimcu_pm_state = PM_STATE_SHUTDOWN;
+			}
 		}
 
-		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == rc)
-		{
-			swimcu_pm_state = PM_STATE_SYNC;
-		}
-		else if (MCI_PROTOCOL_STATUS_CODE_UNKNOWN_COMMAND == rc)
-		{
-			pr_info("%s: pm wait_time_config not recognized by MCU, \
-				proceed with legacy shutdown\n", __func__);
-			swimcu_pm_state = PM_STATE_SHUTDOWN;
-		}
+		/* save the calibration and PSM data before power down */
+		swimcu_pm_data_store(swimcu);
 
 		pr_info("%s: sending ulpm_config", __func__);
-		if(MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
-		   (rc = pm_ulpm_config(swimcu, wu_source))) {
+		rc = pm_ulpm_config(swimcu, wu_source);
+		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS !=rc)
+		{
 			pr_err("%s: pm enable fail %d\n", __func__, rc);
 			ret = -EIO;
 			goto wu_fail;
@@ -986,6 +1222,8 @@ wu_fail:
 			pr_err("%s: cannot restart MCU Watchdog: %d\n", __func__, rc);
 		}
 	}
+
+	swimcu_pm_state = PM_STATE_IDLE;
 
 	return ret;
 }
@@ -2119,16 +2357,20 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		kobject_uevent(&swimcu->pm_calibrate_kobj, KOBJ_ADD);
 
-		/* now start the calibration with default calibration time interval */
-		ret = swimcu_lpo_calibrate_do_enable(swimcu, true);
-		if (ret)
+		/* start the calibration if its data cannot be retieved from MCU */
+		if ((swimcu->calibrate_mcu_time == SWIMCU_CALIBRATE_DATA_DEFAULT) &&
+			(swimcu->calibrate_mdm_time == SWIMCU_CALIBRATE_DATA_DEFAULT))
 		{
-			pr_err("%s: Failed to start MCU timer calibration %d\n", __func__, ret);
-		}
-		else
-		{
-			swimcu_log(INIT, "%s: MCU LPO calibration started %d\n",
-				__func__, swimcu_lpo_calibrate_mcu_time);
+			ret = swimcu_lpo_calibrate_do_enable(swimcu, true);
+			if (ret)
+			{
+				pr_err("%s: Failed to start MCU timer calibration %d\n", __func__, ret);
+			}
+			else
+			{
+				swimcu_log(INIT, "%s: MCU LPO calibration started %d\n",
+					__func__, swimcu_lpo_calibrate_mcu_time);
+			}
 		}
 	}
 
@@ -2184,6 +2426,12 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 			pr_err("%s: cannot create PSM sync support node\n", __func__);
 			ret = -ENOMEM;
 			goto sysfs_add_exit;
+		}
+
+		/* set default sync option for the first-time power up */
+		if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
+		{
+			swimcu_psm_sync_select = swimcu_pm_psm_sync_option_default(swimcu);
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_select_attr.attr);
