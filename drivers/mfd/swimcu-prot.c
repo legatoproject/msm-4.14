@@ -1387,7 +1387,7 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 			switch (configp->source_type) {
 				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS:
 
-					swimcu_log(PROT, "PINS type=%d pins=0x%x", configp->source_type, configp->args.pins);
+					swimcu_log(PROT, "GPIO type=%d pins=0x%x", configp->source_type, configp->args.pins);
 					buffer[1] = configp->args.pins;
 					break;
 
@@ -1399,9 +1399,9 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 
 				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
 
-					swimcu_log(PROT, "ADC type=%d adch=%d",
-						configp->source_type, configp->args.channel);
-					buffer[1] = configp->args.channel;
+					swimcu_log(PROT, "ADC type=%d input pin mask=%d",
+						configp->source_type, configp->args.pins);
+					buffer[1] = configp->args.pins;
 					break;
 
 				default:
@@ -1409,7 +1409,6 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 					return MCI_PROTOCOL_STATUS_CODE_INVALID_ARGUMENT;
 					break;
 			}
-
 
 			break;
 
@@ -1425,6 +1424,7 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 
 			switch (configp->source_type) {
 				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS:
+				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
 
 					buffer[1] = configp->args.pins;
 					break;
@@ -1432,12 +1432,6 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER:
 
 					buffer[1] = 0;
-					break;
-
-				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
-
-					/* add additional adc input channel */
-					buffer[1]   = configp->args.channel;
 					break;
 
 				default:
@@ -1462,6 +1456,7 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 		swimcu_log(PROT, "Returned results %08X %08X ", buffer[0], buffer[1]);
 		switch (configp->source_type) {
 			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS:
+			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
 
 				configp->args.pins = buffer[1];
 				break;
@@ -1469,11 +1464,6 @@ enum mci_protocol_status_code_e swimcu_wakeup_source_config(
 			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER:
 
 				configp->args.timeout = buffer[1];
-				break;
-
-			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
-
-				configp->args.channel = buffer[1];
 				break;
 
 			default:
@@ -2054,7 +2044,7 @@ enum mci_protocol_status_code_e swimcu_appl_data_store(
 	struct swimcu *swimcu,
 	uint32_t index,
 	uint32_t * datap,
-	int count)
+	uint8_t count)
 {
 	enum mci_protocol_status_code_e s_code;
 	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];
@@ -2131,7 +2121,7 @@ enum mci_protocol_status_code_e swimcu_appl_data_retrieve(
 	struct swimcu *swimcu,
 	uint32_t index,
 	uint32_t * datap,
-	int * countp)
+	uint8_t * countp)
 {
 	enum mci_protocol_status_code_e s_code;
 	uint32_t buffer[MCI_PROTOCOL_CMD_PARAMS_COUNT_MAX];

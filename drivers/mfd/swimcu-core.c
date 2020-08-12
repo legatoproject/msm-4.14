@@ -50,7 +50,7 @@ int swimcu_debug_mask = SWIMCU_DEFAULT_DEBUG_LOG;
 int swimcu_fault_mask = 0;
 int swimcu_fault_count = 0;
 
-/* WPx5 ADC2 and ADC3 provided by MCU */
+/* WP ADC2 and ADC3 provided by MCU */
 static const enum mci_protocol_adc_channel_e adc_chan_cfg[] = {
 	[SWIMCU_ADC_PTA12] = MCI_PROTOCOL_ADC0_SE0,
 	[SWIMCU_ADC_PTB1]  = MCI_PROTOCOL_ADC0_SE8
@@ -200,8 +200,8 @@ int swimcu_adc_set_trigger_mode (
 int swimcu_adc_set_compare_mode (
 	enum swimcu_adc_index adc,
 	enum swimcu_adc_compare_mode mode,
-	unsigned compare_val1,
-	unsigned compare_val2)
+	unsigned int compare_val1,
+	unsigned int compare_val2)
 {
 	int cv1;
 	int cv2;
@@ -272,7 +272,7 @@ int swimcu_adc_init_and_start(struct swimcu *swimcu, enum swimcu_adc_index adc)
 
 /************
  *
- * Name:     reset_recovery
+ * Name:     swimcu_reset_recovery
  *
  * Purpose:  refresh MCU configuration
  *
@@ -288,17 +288,17 @@ int swimcu_adc_init_and_start(struct swimcu *swimcu, enum swimcu_adc_index adc)
  *           a MCU firmware update.
  *
  ************/
-static void reset_recovery( struct swimcu *swimcu )
+static void swimcu_reset_recovery( struct swimcu *swimcu )
 {
 	swimcu->adc_init_mask = 0;   /* re-init ADC before next access */
 	if (swimcu_fault_count < SWIMCU_FAULT_COUNT_MAX) {
 		swimcu_device_init(swimcu);
 		swimcu_gpio_refresh(swimcu); /* restore MCU with last gpio config */
 		swimcu_set_fault_mask(SWIMCU_FAULT_RESET);
-		swimcu_log(INIT, "swimcu %s: complete\n", __func__);
+		swimcu_log(INIT, "%s: complete\n", __func__);
 	}
 	else {
-		swimcu_log(INIT, "swimcu %s: suspended\n", __func__);
+		swimcu_log(INIT, "%s: suspended\n", __func__);
 	}
 }
 
@@ -429,7 +429,7 @@ static int swimcu_process_events(struct swimcu *swimcu)
 			else if (events[i].type == MCI_PROTOCOL_EVENT_TYPE_RESET) {
 				swimcu_log(EVENT, "%s: MCU reset source 0x%x\n", __func__, events[i].data.reset.source);
 				if (events[i].data.reset.source != MCI_PROTOCOL_RESET_SRC_EMBEDDED_WATCHDOG) {
-					reset_recovery(swimcu);
+					swimcu_reset_recovery(swimcu);
 				}
 				swimcu_set_reset_source(events[i].data.reset.source);
 			}
@@ -694,7 +694,6 @@ int swimcu_device_init(struct swimcu *swimcu)
 		/* initialize SWIMCU-GPIO module config cache from MCU (no irq handling) */
 		swimcu_gpio_module_init(swimcu, NULL);
 		swimcu_pm_data_restore(swimcu);
-		swimcu_pm_rtc_restore(swimcu);
 	}
 
 	swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_PING;

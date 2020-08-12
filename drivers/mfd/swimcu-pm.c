@@ -64,45 +64,99 @@
 #define SWIMCU_WATCHDOG_TIMEOUT_INVALID      0
 #define SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT  1         /* second */
 
-#define ADC_ATTR_SHOW(name)                                       	\
+/* Two groups of PM data store on MCU persistent across MDM reset */
+#define SWIMCU_PM_DATA_MAX_SIZE  (MCI_PROTOCOL_DATA_GROUP_SIZE * \
+                                  MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS)
+
+/* Group 0: clock/time-related info */
+#define SWIMCU_PM_DATA_CALIBRATE_MDM_TIME      0
+#define SWIMCU_PM_DATA_CALIBRATE_MCU_TIME      1
+#define SWIMCU_PM_DATA_EXPECTED_ULPM_TIME      2
+#define SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME       3
+#define SWIMCU_PM_DATA_4_RESERVED              4
+
+/* Group 1: User wakeup source configuration */
+#define SWIMCU_PM_DATA_WUSRC_TIMEOUT           5
+#define SWIMCU_PM_DATA_WUSRC_GPIO_IRQS         6
+#define SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL      7
+#define SWIMCU_PM_DATA_WUSRC_ADC2_CONFIG       8
+#define SWIMCU_PM_DATA_WUSRC_ADC3_CONFIG       9
+
+/* adc select and thresholds configuration */
+#define SWIMCU_WUSRC_ADC_SELECTED_MASK         0x80000000
+#define SWIMCU_WUSRC_ADC_SELECTED_SHIFT        31
+#define SWIMCU_WUSRC_ADC_ABOVE_THRES_MASK      0x00FFF000
+#define SWIMCU_WUSRC_ADC_ABOVE_THRES_SHIFT     12
+#define SWIMCU_WUSRC_ADC_BELOW_THRES_MASK      0x00000FFF
+#define SWIMCU_WUSRC_ADC_BELOW_THRES_SHIFT     0
+
+/* default values */
+#define SWIMCU_PM_DATA_CALIBRATE_DEFAULT       1
+
+#define SWIMCU_WUSRC_ADC_INTERVAL_DEFAULT      1000   /* milli-seconds */
+#define SWIMCU_WUSRC_ADC_BELOW_THRES_DEFAULT   0
+#define SWIMCU_WUSRC_ADC_ABOVE_THRES_DEFAULT   1800
+#define SWIMCU_WUSRC_ADC_THRES_DEFAULT     (SWIMCU_WUSRC_ADC_BELOW_THRES_DEFAULT + \
+		((SWIMCU_WUSRC_ADC_ABOVE_THRES_DEFAULT << SWIMCU_WUSRC_ADC_ABOVE_THRES_SHIFT) & \
+		SWIMCU_WUSRC_ADC_ABOVE_THRES_MASK))
+
+/* power management data persistent over power cycle */
+static uint32_t swimcu_pm_data[SWIMCU_PM_DATA_MAX_SIZE] =
+{
+	/* group 0 */
+	SWIMCU_PM_DATA_CALIBRATE_DEFAULT,  /* SWIMCU_PM_DATA_CALIBRATE_MDM_TIME */
+	SWIMCU_PM_DATA_CALIBRATE_DEFAULT,  /* SWIMCU_PM_DATA_CALIBRATE_MCU_TIME */
+	0,                                 /* SWIMCU_PM_DATA_EXPECTED_ULPM_TIME */
+	0,                                 /* SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME  */
+	0,                                 /* SWIMCU_PM_DATA_4_RESERVED         */
+
+	/* group 1 */
+	0,                                 /* SWIMCU_PM_DATA_WUSRC_TIMEOUT      */
+	0x0,                               /* SWIMCU_PM_DATA_WUSRC_GPIO_IRQS    */
+	SWIMCU_WUSRC_ADC_INTERVAL_DEFAULT, /* SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL */
+	SWIMCU_WUSRC_ADC_THRES_DEFAULT,    /* SWIMCU_PM_DATA_WUSRC_ADC2_CONFIG  */
+	SWIMCU_WUSRC_ADC_THRES_DEFAULT,    /* SWIMCU_PM_DATA_WUSRC_ADC3_CONFIG  */
+};
+
+#define ADC_ATTR_SHOW(name)                                             \
 	static ssize_t pm_adc_##name##_attr_show(struct kobject *kobj,  \
 		struct kobj_attribute *attr, char *buf)                 \
 	{                                                               \
 		unsigned int value = 0;                                 \
 		enum swimcu_adc_index adc;                              \
 		enum wusrc_index wi = find_wusrc_index_from_kobj(kobj); \
-	                                                                \
+                                                                        \
 		if (WUSRC_INVALID != wi) {                              \
 			adc = wusrc_param[wi].id;                       \
-			value = adc_trigger_config[adc].name;           \
+			value = swimcu_pm_wusrc_adc_##name##_get(adc);  \
 		}                                                       \
 		return scnprintf(buf, PAGE_SIZE, "%d\n", value);        \
 	}
 
-#define ADC_ATTR_STORE(name)                                      	\
+#define ADC_ATTR_STORE(name)                                            \
 	static ssize_t pm_adc_##name##_attr_store(struct kobject *kobj, \
 		struct kobj_attribute *attr, const char *buf, size_t count) \
 	{                                                               \
 		unsigned int value = 0;                                 \
 		enum swimcu_adc_index adc;                              \
 		enum wusrc_index wi = find_wusrc_index_from_kobj(kobj); \
-		int ret;						\
-	                                                                \
+		int ret;                                                \
+                                                                        \
 		if (WUSRC_INVALID == wi) {                              \
-			return -EINVAL; 			        \
+			return -EINVAL;                                 \
 		}                                                       \
-		adc = wusrc_param[wi].id;				\
+		adc = wusrc_param[wi].id;                               \
 		ret = kstrtouint(buf, 0, &value);                       \
 		if (!ret) {                                             \
-			if (value <= SWIMCU_ADC_VREF) {			\
-				adc_trigger_config[adc].name = value;   \
-				ret = count;				\
-			}						\
-			else {						\
-				ret = -ERANGE;				\
-			}						\
-		}							\
-		return ret;						\
+			if (value <= SWIMCU_ADC_VREF) {                 \
+				swimcu_pm_wusrc_adc_##name##_set(adc, value); \
+				ret = count;                            \
+			}                                               \
+			else {                                          \
+				ret = -ERANGE;                          \
+			}                                               \
+		}                                                       \
+		return ret;                                             \
 	};
 
 /* generate extra debug logs */
@@ -140,10 +194,11 @@ static struct kobj_type ktype = {
 	.release = release_kobj,
 };
 
-static const struct pin_trigger_map {
+/* Mapping table for MCU IRQ type enumerated values and corresponding ASCII strings */
+static const struct swimcu_irq_type_name_map_s {
 	enum mci_pin_irqc_type_e type;
 	char *name;
-} pin_trigger[] = {
+} swimcu_irq_type_name_map[] = {
 	{MCI_PIN_IRQ_DISABLED,     "none"},
 	{MCI_PIN_IRQ_DISABLED,     "off"},
 	{MCI_PIN_IRQ_LOGIC_ZERO,   "low"},
@@ -169,42 +224,41 @@ enum wusrc_index {
 	WUSRC_MAX      = WUSRC_ADC3,
 };
 
+/* Data structure used to record the state of wakeup source config process
+*  Used to recover the original config in case of failure
+*/
+struct swimcu_wusrc_config_state_s
+{
+	uint32_t wusrc_mask;                     /* configured wakeup source   */
+	uint32_t gpio_pin_mask;                  /* configured GPIO pins       */
+	uint32_t adc_pin_mask;                   /* configured ADC pins        */
+	uint8_t  recovery_irqs[WUSRC_NUM_GPIO];  /* original GPIO pin IRQ type */
+};
+
+/* Table of the parameters (constants) of the available wakeup source */
 static const struct wusrc_param {
-	enum mci_protocol_wakeup_source_type_e type;
-	int id;
-	uint32_t mask;
+	enum mci_protocol_wakeup_source_type_e type;  /* type of the wakeup source */
+	int                                    id;    /* index into the local configuration table of the wakeup type */
+	uint32_t                               mask;  /* GPIO: mask identifier, TIMER: HW timer type, ADC mask identifier */
 } wusrc_param[] = {
 	[WUSRC_GPIO36] = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS, SWIMCU_GPIO_PTA0, MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTA0},
 	[WUSRC_GPIO38] = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS, SWIMCU_GPIO_PTB0, MCI_PROTOCOL_WAKEUP_SOURCE_EXT_PIN_BITMASK_PTB0},
-	[WUSRC_TIMER]  = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER, 0, 0},
-	[WUSRC_ADC2]   = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC, SWIMCU_ADC_PTA12, MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTA12},
-	[WUSRC_ADC3]   = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC, SWIMCU_ADC_PTB1, MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTB1},
+	[WUSRC_TIMER]  = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER,    0,                0,                                             },
+	[WUSRC_ADC2]   = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC,      SWIMCU_ADC_PTA12, MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTA12},
+	[WUSRC_ADC3]   = {MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC,      SWIMCU_ADC_PTB1,  MCI_PROTOCOL_WAKEUP_SOURCE_ADC_PIN_BITMASK_PTB1},
 };
 
-static struct wusrc_value {
+/* Mapping table of "triggered" status and associated SYSFS KObject of the wakeup sources */
+static struct swimcu_pm_wusrc_status {
 	struct kobject *kobj;
-	int triggered;
-} wusrc_value[] = {
+	int             triggered;
+} swimcu_pm_wusrc_status[] = {
 	[WUSRC_GPIO36] = {NULL, 0},
 	[WUSRC_GPIO38] = {NULL, 0},
 	[WUSRC_TIMER]  = {NULL, 0},
 	[WUSRC_ADC2]   = {NULL, 0},
 	[WUSRC_ADC3]   = {NULL, 0},
 };
-
-static struct adc_trigger_config {
-	unsigned int above;
-	unsigned int below;
-	bool select;
-} adc_trigger_config[] = {
-	[SWIMCU_ADC_PTA12] = {0, 1800, false},
-	[SWIMCU_ADC_PTB1]  = {0, 1800, false},
-};
-
-static uint32_t adc_interval = 0;
-
-/* SWIMCU_PM_DATA_WUSRC_GPIO_IRQS */
-static uint8_t swimcu_wusrc_gpio_irq_cfg[WUSRC_NUM_GPIO] = {MCI_PIN_IRQ_DISABLED};
 
 static char* poweroff_argv[] = {"/sbin/poweroff", NULL};
 
@@ -215,7 +269,6 @@ static char* poweroff_argv[] = {"/sbin/poweroff", NULL};
 #define PM_STATE_SHUTDOWN 2
 
 /* Power management configuration */
-static u32 swimcu_wakeup_time = 0;
 static int swimcu_pm_enable = SWIMCU_PM_OFF;
 static int swimcu_pm_state = PM_STATE_IDLE;
 
@@ -225,19 +278,11 @@ static u32 swimcu_watchdog_timeout = SWIMCU_WATCHDOG_TIMEOUT_INVALID;
 static u32 swimcu_watchdog_reset_delay = SWIMCU_WATCHDOG_RESET_DELAY_DEFAULT;
 static u32 swimcu_watchdog_renew_count = 0;
 
-/* MCU psm support configuration */
+/* MCU psm support configuration (psm time is aliased to ulpm time) */
 static u32 swimcu_psm_active_time = 0;
 static enum mci_protocol_pm_psm_sync_option_e
                 swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE;
 
-#define SWIMCU_PM_DATA_GROUP_INDEX_0              0
-#define SWIMCU_PM_DATA_INDEX_CALIBRATE_MDM_TIME   0
-#define SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME   1
-#define SWIMCU_PM_DATA_INDEX_EXPECTED_ULPM_TIME   2
-#define SWIMCU_PM_DATA_INDEX_PRE_ULPM_RTC_TIME    3
-#define SWIMCU_PM_DATA_INDEX_RESERVED             4
-
-static u32 swimcu_pm_data_group[MCI_PROTOCOL_DATA_GROUP_SIZE];
 
 /* SYSFS support for MCU 1K LPO clock calibration */
 static int swimcu_lpo_calibrate_enable   = SWIMCU_DISABLE;
@@ -266,17 +311,19 @@ int swimcu_pm_wusrc_gpio_irq_set(
 	enum mci_pin_irqc_type_e irq)
 {
 	int ret = 0;
+	uint8_t *irq_typep = (uint8_t*)
+		&(swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_GPIO_IRQS]);
 
 	switch (index)
 	{
 		case SWIMCU_GPIO_PTA0:
 
-			swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO36] = 0xFF & irq;
+			irq_typep[WUSRC_GPIO36] = 0xFF & irq;
 			break;
 
 		case SWIMCU_GPIO_PTB0:
 
-			swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO38] = 0xFF & irq;
+			irq_typep[WUSRC_GPIO38] = 0xFF & irq;
 			break;
 
 		default:
@@ -304,17 +351,19 @@ static enum mci_pin_irqc_type_e swimcu_pm_wusrc_gpio_irq_get(
 	enum swimcu_gpio_index index)
 {
 	enum mci_pin_irqc_type_e irq;
+	uint8_t *irq_typep = (uint8_t*)
+		&(swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_GPIO_IRQS]);
 
 	switch (index)
 	{
 		case SWIMCU_GPIO_PTA0:
 
-			irq = (enum mci_pin_irqc_type_e) swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO36];
+			irq = (enum mci_pin_irqc_type_e) irq_typep[WUSRC_GPIO36];
 			break;
 
 		case SWIMCU_GPIO_PTB0:
 
-			irq = (enum mci_pin_irqc_type_e) swimcu_wusrc_gpio_irq_cfg[WUSRC_GPIO38];
+			irq = (enum mci_pin_irqc_type_e) irq_typep[WUSRC_GPIO38];
 			break;
 
 		default:
@@ -325,6 +374,204 @@ static enum mci_pin_irqc_type_e swimcu_pm_wusrc_gpio_irq_get(
 	return irq;
 }
 
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_config_datap_get (helper function)
+*
+* Purpose:  Get pointer to data encoding the ADC wakeup source configuration
+*
+* Parms:    index - index of the ADC for which the data pointer to be returned
+*
+* Return:   Pointer to the configured ADC config if successful; NULL otherwise.
+*
+* Abort:    none
+*
+************/
+static uint32_t* swimcu_pm_wusrc_adc_config_datap_get(enum swimcu_adc_index index)
+{
+	if (index == SWIMCU_ADC_PTA12)
+	{
+		return &(swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC2_CONFIG]);
+	}
+
+	if (index == SWIMCU_ADC_PTB1)
+	{
+		return &(swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC3_CONFIG]);
+	}
+
+	return NULL;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_above_set
+*
+* Purpose:  Set the ADC threshold above which a wakeup triggers
+*
+* Parms:    index - index of the ADC for which the property to set
+*           above - value of 'above' threshold to set
+*
+* Return:   0 if successful, -1 otherwise
+*
+* Abort:    none
+*
+************/
+static int swimcu_pm_wusrc_adc_above_set(enum swimcu_adc_index index, uint32_t above)
+{
+	uint32_t* datap = swimcu_pm_wusrc_adc_config_datap_get(index);
+
+	if (!datap)
+	{
+		return -1;
+	}
+
+	above <<= SWIMCU_WUSRC_ADC_ABOVE_THRES_SHIFT;
+	above &=  SWIMCU_WUSRC_ADC_ABOVE_THRES_MASK;
+
+	*datap &= ~SWIMCU_WUSRC_ADC_ABOVE_THRES_MASK;
+	*datap |= above;
+
+	return 0;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_above_get
+*
+* Purpose:  get the ADC threshold above which a wakeup triggers
+*
+* Parms:    index - index of the ADC for which the property to get
+*
+* Return:   The value of the 'above' threshold
+*
+* Abort:    none
+*
+************/
+static uint32_t swimcu_pm_wusrc_adc_above_get(enum swimcu_adc_index index)
+{
+	uint32_t above = SWIMCU_WUSRC_ADC_ABOVE_THRES_DEFAULT;
+	uint32_t* datap = swimcu_pm_wusrc_adc_config_datap_get(index);
+
+	if (datap)
+	{
+		above = (*datap) & SWIMCU_WUSRC_ADC_ABOVE_THRES_MASK;
+		above >>= SWIMCU_WUSRC_ADC_ABOVE_THRES_SHIFT;
+	}
+
+	return above;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_below_set
+*
+* Purpose:  Set the threshold below which a wakeup triggers
+*
+* Parms:    index - index of the ADC for which the property to set
+*           below - value of 'below' threshold
+*
+* Return:   0 if successful, -1 otherwise
+*
+* Abort:    none
+*
+************/
+static int swimcu_pm_wusrc_adc_below_set(enum swimcu_adc_index index, uint32_t below)
+{
+	uint32_t* datap = swimcu_pm_wusrc_adc_config_datap_get(index);
+	if (!datap)
+	{
+		return -1;
+	}
+
+	*datap &= ~SWIMCU_WUSRC_ADC_BELOW_THRES_MASK;
+	*datap |= below & SWIMCU_WUSRC_ADC_BELOW_THRES_MASK;
+	return 0;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_below_get
+*
+* Purpose:  Get the threshold below which a wakeup triggers
+*
+* Parms:    index - index of the ADC for which the property to get
+*
+* Return:   The value of the 'below' threshold
+*
+* Abort:    none
+*
+************/
+static uint32_t swimcu_pm_wusrc_adc_below_get(enum swimcu_adc_index index)
+{
+	uint32_t below = SWIMCU_WUSRC_ADC_BELOW_THRES_DEFAULT;
+	uint32_t* datap = swimcu_pm_wusrc_adc_config_datap_get(index);
+
+	if (datap)
+	{
+		below = (*datap) & SWIMCU_WUSRC_ADC_BELOW_THRES_MASK;
+	}
+
+	return below;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_select_get
+*
+* Purpose:  To set whether a specific ADC is selected as a wakeup source
+*
+* Parms:    index  - index of the ADC which is selected or deselected
+*           select - whether the ADC is selected (1 select, 0 deselect)
+*
+* Return:   0 if successful; -1 otherwise.
+*
+* Abort:    none
+*
+************/
+static int swimcu_pm_wusrc_adc_select_set(enum swimcu_adc_index index, int selected)
+{
+	uint32_t* datap = swimcu_pm_wusrc_adc_config_datap_get(index);
+	if (!datap)
+	{
+		return -1;
+	}
+
+	if (selected)
+	{
+		*datap |= SWIMCU_WUSRC_ADC_SELECTED_MASK;
+	}
+	else
+	{
+		*datap &= ~SWIMCU_WUSRC_ADC_SELECTED_MASK;
+	}
+	return 0;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_adc_select_get
+*
+* Purpose:  Query whether specific ADC is selected as a wakeup source
+*
+* Parms:    index - index of the ADC
+*
+* Return:   1 if selected; 0 otherwise
+*
+* Abort:    none
+*
+************/
+static int swimcu_pm_wusrc_adc_select_get(enum swimcu_adc_index index)
+{
+	int select = 0;
+	uint32_t* datap = swimcu_pm_wusrc_adc_config_datap_get(index);
+
+	if (datap)
+	{
+		select = ((*datap) & SWIMCU_WUSRC_ADC_SELECTED_MASK) ? 1 : 0;
+	}
+
+	return select;
+}
 
 /************
 *
@@ -548,7 +795,7 @@ static enum wusrc_index find_wusrc_index_from_kobj(struct kobject *kobj)
 	enum wusrc_index wi;
 
 	for (wi = 0; wi <= WUSRC_MAX; wi++) {
-		if (wusrc_value[wi].kobj == kobj) {
+		if (swimcu_pm_wusrc_status[wi].kobj == kobj) {
 			break;
 		}
 	}
@@ -677,13 +924,13 @@ int pm_reboot_call(
 			 * so we can set a sync wait time of 0 to shutdown
 			 * immediately after ULPM is configured
 			 */
-			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
-                           (rc = swimcu_pm_wait_time_config(swimcu, 0, 0))) {
+			rc = swimcu_pm_wait_time_config(swimcu, 0, 0);
+			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != rc) {
 				pr_err("%s: pm wait_time_config failed %d\n", __func__, rc);
 			}
 
-			if(MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
-                          (rc = pm_ulpm_config(swimcu, 0))) {
+			rc = pm_ulpm_config(swimcu, 0);
+			if(MCI_PROTOCOL_STATUS_CODE_SUCCESS != rc) {
 				pr_err("%s: pm ulpm_config fail %d\n", __func__, rc);
 			}
 			break;
@@ -851,6 +1098,7 @@ static u32 swimcu_pm_psm_time_get(void)
 	return interval;
 }
 
+
 /************
 *
 * Name:     swimcu_pm_data_store
@@ -868,12 +1116,13 @@ void swimcu_pm_data_store(struct swimcu *swimcup)
 {
 	enum mci_protocol_status_code_e s_code;
 	struct timeval tv;
+	uint8_t i;
 
 	/* Save MCU clock calibration data */
 	mutex_lock(&swimcup->calibrate_mutex);
-	swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MDM_TIME] =
+	swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME] =
 		swimcup->calibrate_mdm_time;
-	swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME] =
+	swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME] =
 		swimcup->calibrate_mcu_time;
 	mutex_unlock(&swimcup->calibrate_mutex);
 
@@ -881,53 +1130,19 @@ void swimcu_pm_data_store(struct swimcu *swimcup)
 	tv.tv_sec = 0;
 	do_gettimeofday(&tv);
 	tv.tv_sec += (tv.tv_usec + USEC_PER_SEC/2)/USEC_PER_SEC;
-	swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_PRE_ULPM_RTC_TIME] = tv.tv_sec;
-	pr_info("%s: sending persistent data to MCU\n", __func__);
+	swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME] = tv.tv_sec;
 
-	s_code = swimcu_appl_data_store(swimcup,
-		SWIMCU_PM_DATA_GROUP_INDEX_0, swimcu_pm_data_group, MCI_PROTOCOL_DATA_GROUP_SIZE);
-	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+	for (i = 0; i < MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS; i++)
 	{
-		/* it may fail if MCUFW does not support the feature but continue any way */
-		pr_err("%s: failed to store data to MCU %d\n", __func__, s_code);
-	}
-}
-
-/************
-*
-* Name:     swimcu_pm_data_restore
-*
-* Purpose:  To restore previously saved data from MCU
-*
-* Parms:    swimcup - pointer to device driver data
-*
-* Return:   none
-*
-* Abort:    none
-*
-************/
-void swimcu_pm_data_restore(struct swimcu *swimcup)
-{
-	enum mci_protocol_status_code_e s_code;
-	int count;
-
-	count = MCI_PROTOCOL_DATA_GROUP_SIZE;
-	s_code = swimcu_appl_data_retrieve(swimcup, 0, swimcu_pm_data_group, &count);
-	if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
-	{
-		pr_err("%s: failed to retrive data stored on MCU\n", __func__);
-		return;
-	}
-
-	if (count && (swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME] != 0))
-	{
-		/* restore the calibration data */
-		mutex_lock(&swimcup->calibrate_mutex);
-		swimcup->calibrate_mcu_time =
-			swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MCU_TIME];
-		swimcup->calibrate_mdm_time =
-			swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_CALIBRATE_MDM_TIME];
-		mutex_unlock(&swimcup->calibrate_mutex);
+		swimcu_log(INIT, "%s: sending persistent data group %d to MCU\n", __func__, i);
+		s_code = swimcu_appl_data_store(swimcup, i,
+			&(swimcu_pm_data[i * MCI_PROTOCOL_DATA_GROUP_SIZE]),
+			MCI_PROTOCOL_DATA_GROUP_SIZE);
+		if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			/* it may fail if MCUFW does not support the feature but continue any way */
+			pr_err("%s: failed to store data to MCU %d\n", __func__, s_code);
+		}
 	}
 }
 
@@ -952,6 +1167,22 @@ void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 	struct timespec tv;
 	int ret;
 
+	if (swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME] == 0)
+	{
+		swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME] = SWIMCU_PM_DATA_CALIBRATE_DEFAULT;
+		swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME] = SWIMCU_PM_DATA_CALIBRATE_DEFAULT;
+	}
+	else
+	{
+		/* restore the calibration data */
+		mutex_lock(&swimcup->calibrate_mutex);
+		swimcup->calibrate_mcu_time =
+			swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MCU_TIME];
+		swimcup->calibrate_mdm_time =
+			swimcu_pm_data[SWIMCU_PM_DATA_CALIBRATE_MDM_TIME];
+		mutex_unlock(&swimcup->calibrate_mutex);
+	}
+
 	s_code = swimcu_appl_psm_duration_get(swimcup, &ulpm_time, &sync_opt);
 	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != s_code)
 	{
@@ -959,15 +1190,16 @@ void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 		return;
 	}
 
+	/* restore sync select configuration */
 	swimcu_psm_sync_select = sync_opt;
 	if ((sync_opt == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A) ||
 		(sync_opt == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_B))
 	{
-		pr_err("%s: no RTC recovery is required for sync option %d\n", __func__, sync_opt);
+		swimcu_log(INIT, "%s: no RTC recovery is required for sync option %d\n", __func__, sync_opt);
 		return;
 	}
 
-	pr_err("%s: MCUFW elapsed PSM tme: %d\n", __func__, ulpm_time);
+	pr_info("%s: MCUFW elapsed PSM tme: %d\n", __func__, ulpm_time);
 	if (ulpm_time == 0)
 	{
 		pr_err("%s: invalid PSM elapsed time: %d\n", __func__, ulpm_time);
@@ -978,7 +1210,7 @@ void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 	ulpm_time *= swimcup->calibrate_mdm_time;
 	ulpm_time /= swimcup->calibrate_mcu_time;
 
-	pr_err("%s ULPM duration converted to MDM time scale: %d ms\n", __func__, ulpm_time);
+	pr_info("%s ULPM duration converted to MDM time scale: %d ms\n", __func__, ulpm_time);
 
 	/* pre-psm rtc stored on MCU */
 	tv.tv_sec = ulpm_time / MSEC_PER_SEC;
@@ -987,18 +1219,446 @@ void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 	pr_err("%s ULPM duration converted to MDM time scale: %lu s %lu ns\n",
 		__func__, tv.tv_sec, tv.tv_nsec);
 
-	tv.tv_sec += swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_PRE_ULPM_RTC_TIME];
+	tv.tv_sec += swimcu_pm_data[SWIMCU_PM_DATA_PRE_ULPM_RTC_TIME];
 
-	pr_err("%s updated post-PSM RTC: %lu sec\n", __func__, tv.tv_sec);
+	pr_info("%s updated post-PSM RTC: %lu sec\n", __func__, tv.tv_sec);
 
 	ret = do_settimeofday(&tv);
 	if (ret == 0)
 	{
-		pr_err("%s set post-ULPM RTC\n", __func__);
+		pr_info("%s set post-ULPM RTC\n", __func__);
 	}
 	else
 	{
 		pr_err("%s failed to set post-ULPM RTC ret=%d\n", __func__, ret);
+	}
+}
+
+/************
+*
+* Name:     swimcu_pm_data_restore
+*
+* Purpose:  To restore previously saved data from MCU
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   none
+*
+* Abort:    none
+*
+************/
+void swimcu_pm_data_restore(struct swimcu *swimcup)
+{
+	enum mci_protocol_status_code_e s_code;
+	uint8_t i, j, count;
+
+	for (i = 0; i < MCI_PROTOCOL_MAX_NUMBER_OF_DATA_GROUPS; i++)
+	{
+		count = MCI_PROTOCOL_DATA_GROUP_SIZE;
+		s_code = swimcu_appl_data_retrieve(swimcup, i,
+			&(swimcu_pm_data[i * MCI_PROTOCOL_DATA_GROUP_SIZE]), &count);
+
+		if (s_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			pr_err("%s: failed to retrive data stored on MCU\n", __func__);
+
+			/* perhaps MCUFW does not support the feature */
+			continue;
+		}
+
+		swimcu_log(INIT, "%s: retrieved persistent data group %d from MCU\n", __func__, i);
+		for (j = 0; j < MCI_PROTOCOL_DATA_GROUP_SIZE; j++)
+		{
+			swimcu_log(INIT, "swimcu_pm_data[%d]:  0x%08x\n", j, swimcu_pm_data[i*MCI_PROTOCOL_DATA_GROUP_SIZE+j]);
+		}
+	}
+
+	swimcu_pm_rtc_restore(swimcup);
+
+	if (swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL] == 0)
+	{
+		/* initialization on first-time powerup */
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL] = SWIMCU_WUSRC_ADC_INTERVAL_DEFAULT;
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC2_CONFIG] = SWIMCU_WUSRC_ADC_THRES_DEFAULT;
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC3_CONFIG] = SWIMCU_WUSRC_ADC_THRES_DEFAULT;
+	}
+}
+
+/************
+*
+* Name:     swimcu_pm_psm_timer_config
+*
+* Purpose:  To configure PSM timer wakeup source (if needed)
+*
+* Parms:    swimcup - pointer to device driver data
+*
+* Return:   0 if successful; negative errno otherwise.
+*
+* Abort:    none
+*
+************/
+static int swimcu_pm_psm_timer_config(struct swimcu *swimcup)
+{
+	uint32_t timeout;
+	int ret;
+
+	pr_info("%s: user-selected psm sync option %d\n", __func__, swimcu_psm_sync_select);
+
+	/* select default sync option if none is specified by user */
+	if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
+	{
+		swimcu_psm_sync_select = swimcu_pm_psm_sync_option_default(swimcup);
+		if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
+		{
+			pr_err("%s: no PSM synchronization support\n", __func__);
+			return -EPERM;
+		}
+	}
+
+	if (swimcu_psm_sync_select != MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A)
+	{
+		/* attempt to read remaining PSM time if sync option A is not specified */
+		timeout = swimcu_pm_psm_time_get();
+		pr_info("%s: configured psm time %d\n", __func__, timeout);
+		if (timeout > 0)
+		{
+			/* mitigate the risk of LPO clock variation over temperature */
+			timeout *= (100 - SWIMCU_CALIBRATE_TEMPERATURE_FACTOR);
+			timeout /= 100;
+			pr_info("%s: at floor of tempreture variation %d\n", __func__, timeout);
+
+			timeout = swimcu_mdm_sec_to_mcu_time_ms(swimcup, timeout);
+			pr_info("%s: device calibration %d\n", __func__, timeout);
+		}
+		else
+		{
+			/* fall back to sync option A with invalid zero PSM time*/
+			pr_info("%s: cannot get PSM time--fall back to option A\n", __func__);
+			swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A;
+		}
+	}
+	else
+	{
+		timeout = 0;
+	}
+
+	swimcu_log(INIT, "%s: sending psm_sync_config sync option %d max_wait %u psm time %u\n",
+		__func__, swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
+
+	ret = swimcu_psm_sync_config(swimcup,
+		swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
+	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != ret)
+	{
+		pr_err("%s: cannot config MCU for PSM synchronization %d\n", __func__, ret);
+		return -EIO;
+	}
+
+	swimcu_pm_data[SWIMCU_PM_DATA_EXPECTED_ULPM_TIME] = timeout;
+	return 0;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_config
+*
+* Purpose:  To configure ULPM wakeup source
+*
+* Parms:    swimcup - pointer to device driver data
+*           pm      - requested power management mode
+*           statep  - pointer to the data storage for the configuration state
+*
+* Return:   0 if successful; negative errno otherwise.
+*
+* Abort:    none
+*
+************/
+static int swimcu_pm_wusrc_config(
+	struct swimcu *swimcup,
+	int pm,
+	struct swimcu_wusrc_config_state_s * statep)
+{
+	struct mci_wakeup_source_config_s wusrc_config = {0};
+	enum swimcu_gpio_index gpio;
+	enum swimcu_adc_index  adc;
+	enum wusrc_index wi;
+	int err_code;
+	int irq, wrsrc_irq;
+	unsigned int above, below;
+
+	/* configure enabled wakeup sources per their types */
+	for (wi = 0; wi < ARRAY_SIZE(wusrc_param); wi++)
+	{
+		switch (wusrc_param[wi].type)
+		{
+			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS:
+
+				gpio = (enum swimcu_gpio_index) wusrc_param[wi].id;
+				wrsrc_irq = swimcu_pm_wusrc_gpio_irq_get(gpio);
+				if (wrsrc_irq == MCI_PIN_IRQ_DISABLED)
+				{
+					break;
+				}
+
+				/* save the current IRQ type for recovery just for in-case */
+				err_code = swimcu_gpio_get(swimcup, SWIMCU_GPIO_GET_EDGE, gpio, &irq);
+				if (err_code)
+				{
+					pr_err("%s: failed to get IRQ for gpio %d err=%d\n", __func__, gpio, err_code);
+					return err_code;
+				}
+				statep->recovery_irqs[wi] = irq & 0xFF;
+
+				/* set specific IRQ type configured by user */
+				err_code = swimcu_gpio_set(swimcup, SWIMCU_GPIO_SET_EDGE, gpio, wrsrc_irq);
+				if (err_code < 0)
+				{
+					pr_err("%s: failed to set irqc 0x%x for gpio %d (err=%d)\n",
+						__func__, wrsrc_irq, gpio, err_code);
+					return err_code;
+				}
+
+				if (wrsrc_irq != MCI_PIN_IRQ_DISABLED)
+				{
+					statep->gpio_pin_mask |= wusrc_param[wi].mask;
+				}
+
+				swimcu_log(INIT, "%s: configured GPIO wakeup source 0x%x \n",__func__, statep->gpio_pin_mask);
+
+				break;
+
+			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
+
+				adc = wusrc_param[wi].id;
+				if (!swimcu_pm_wusrc_adc_select_get(adc))
+				{
+					break;
+				}
+
+				do {
+					/* set up HW tiemr driven ADC */
+					err_code = swimcu_adc_set_trigger_mode(adc, MCI_PROTOCOL_ADC_TRIGGER_MODE_HW,
+						swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL]);
+					if (err_code)
+					{
+						pr_err("%s: failed (%d) to set ADC trigger mode \n",__func__, err_code);
+						break;
+					}
+
+					/*
+					* if above > below, then trigger when value falls in the range (0, below) or (above, 1800)
+					* if above <= below, trigger when value falls in the range (above, below)
+					*/
+					above = swimcu_pm_wusrc_adc_above_get(adc);
+					below = swimcu_pm_wusrc_adc_below_get(adc);
+					if (above > below)
+					{
+						err_code = swimcu_adc_set_compare_mode(adc,
+							MCI_PROTOCOL_ADC_COMPARE_MODE_BEYOND, above, below);
+					}
+					else
+					{
+						err_code = swimcu_adc_set_compare_mode(adc,
+							MCI_PROTOCOL_ADC_COMPARE_MODE_WITHIN, above, below);
+					}
+
+					if (err_code)
+					{
+						pr_err("%s: failed (%d) to set ADC trigger mode\n",__func__, err_code);
+						break;
+					}
+
+					err_code = swimcu_adc_init_and_start(swimcup, adc);
+					if (err_code)
+					{
+						pr_err("%s: failed (%d) to start ADC\n",__func__, err_code);
+						break;
+					}
+				}while (false);
+
+				if (!err_code)
+				{
+					swimcu_log(INIT, "%s: config adc index %d as wakeup source\n", __func__, adc);
+					statep->adc_pin_mask |= wusrc_param[wi].mask;
+				}
+				break;
+
+			case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER:
+
+				/* single source of the type; config depends on PM type requested */
+				break;
+
+			default:
+				/* do nothing */;
+				break;
+		} /* end of switch statement */
+	} /* end of wakeup source configuration for-loop */
+
+	/* Specify GPIO and ADC as wakeup source if configured */
+	pr_err("%s: check statep->gpio_pin_mask 0x%x \n",__func__, statep->gpio_pin_mask);
+	if (statep->gpio_pin_mask)
+	{
+		wusrc_config.args.pins = statep->gpio_pin_mask;
+		wusrc_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS;
+		err_code = swimcu_wakeup_source_config(swimcup, &wusrc_config, MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET);
+		if (err_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			pr_err("%s: failed to GPIO config 0x%x (%d)\n", __func__, statep->gpio_pin_mask, err_code);
+			return -EIO;
+		}
+
+		statep->wusrc_mask |= (u16)MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS;
+		pr_err("%s: statep->wusrc_mask=0x%x\n", __func__, statep->wusrc_mask);
+	}
+
+	if (statep->adc_pin_mask)
+	{
+		wusrc_config.args.pins = statep->adc_pin_mask;
+		wusrc_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC;
+		err_code = swimcu_wakeup_source_config(swimcup, &wusrc_config, MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET);
+		if (err_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+		{
+			pr_err("%s: failed to GPIO config 0x%x (%d)\n", __func__, statep->adc_pin_mask, err_code);
+			return -EIO;
+		}
+
+		statep->wusrc_mask |= (u16)MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC;
+		pr_err("%s: statep->adc_pin_mask=0x%x\n", __func__, statep->adc_pin_mask);
+	}
+
+	/* timer-based wakeup source configration */
+	if (pm == SWIMCU_PM_PSM_SYNC)
+	{
+		err_code = swimcu_pm_psm_timer_config(swimcup);
+		if (err_code)
+		{
+			pr_err("%s: failed to config timer wakeup source %d\n", __func__, err_code);
+			return err_code;
+		}
+
+		statep->wusrc_mask |= MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
+	}
+	else  /* Non-PSM ULPM */
+	{
+		if (swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT] > 0)
+		{
+			/* wakeup time has been validated upon user input (in seconds)
+			*  which garantees no overflow in the following calculation.
+			*/
+			wusrc_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
+			wusrc_config.args.timeout =
+				swimcu_mdm_sec_to_mcu_time_ms(swimcup,
+					swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT]);
+			err_code = swimcu_wakeup_source_config(swimcup,
+				&wusrc_config, MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET);
+			if (err_code != MCI_PROTOCOL_STATUS_CODE_SUCCESS)
+			{
+				pr_err("%s: timer wu fail %d\n", __func__, err_code);
+				return -EIO;
+			}
+
+			swimcu_pm_data[SWIMCU_PM_DATA_EXPECTED_ULPM_TIME] = wusrc_config.args.timeout;
+			statep->wusrc_mask |= MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
+
+			swimcu_log(INIT, "%s: ULPM wakeup time %u (mcu=%u)\n", __func__,
+				swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT], wusrc_config.args.timeout);
+		}
+	}
+
+	return 0;
+}
+
+/************
+*
+* Name:     swimcu_pm_wusrc_config_reset
+*
+* Purpose:  To reset ULPM wakeup source configuration
+*
+* Parms:    swimcup - pointer to device driver data
+*           statep  - pointer to wakeup source config state data
+*
+* Return:   none
+*
+* Note:     Best-effort to reverse the wakeup source configuration.
+*
+* Abort:    none
+*
+************/
+static void swimcu_pm_wusrc_config_reset(
+	struct swimcu *swimcup,
+	struct swimcu_wusrc_config_state_s * statep)
+{
+	struct mci_wakeup_source_config_s wusrc_config;
+	enum mci_protocol_wakeup_source_type_e type_mask;
+	enum wusrc_index wi;
+	enum swimcu_gpio_index gpio;
+	enum mci_pin_irqc_type_e irq;
+	enum mci_protocol_hw_timer_state_e timer_state;
+	uint32_t timeout = 0;
+
+	swimcu_log(INIT, "%s\n", __func__);
+	if (statep->wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS)
+	{
+		for (wi = WUSRC_MIN; wi < WUSRC_NUM_GPIO; wi++)
+		{
+			/* disable interrupt for configurated GPIO wakeup source */
+			if (statep->gpio_pin_mask & wusrc_param[wi].mask)
+			{
+				gpio = (enum swimcu_gpio_index) wusrc_param[wi].id;
+				irq = swimcu_pm_wusrc_gpio_irq_get(gpio);
+				if (statep->recovery_irqs[wi] != irq)
+				{
+					(void) swimcu_gpio_set(swimcup,
+						SWIMCU_GPIO_SET_EDGE, gpio, statep->recovery_irqs[wi]);
+				}
+			}
+		}
+	}
+
+	if (statep->wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER)
+	{
+		(void)mci_appl_timer_stop(swimcup, &timer_state, &timeout);
+	}
+
+	if (statep->wusrc_mask & MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC)
+	{
+		(void)swimcu_adc_deinit(swimcup);
+	}
+
+	/* Clear all configured wakeup source types */
+	type_mask = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS;
+	while (statep->wusrc_mask)
+	{
+		if (statep->wusrc_mask & type_mask)
+		{
+			wusrc_config.source_type = type_mask;
+			switch (type_mask)
+			{
+				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS:
+
+					wusrc_config.args.pins = statep->gpio_pin_mask;
+					break;
+
+				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER:
+
+					wusrc_config.args.timeout = 0;
+					break;
+
+				case MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC:
+
+					wusrc_config.args.pins = statep->adc_pin_mask;
+					break;
+
+				default:
+					pr_err("%s ignore invalid wakeup source type 0x%x\n", __func__, type_mask);
+			}
+
+			(void)swimcu_wakeup_source_config(swimcup,
+				&wusrc_config, MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_CLEAR);
+
+			statep->wusrc_mask &= ~type_mask;
+		}
+
+		type_mask <<= 1;
 	}
 }
 
@@ -1022,20 +1682,13 @@ void swimcu_pm_rtc_restore(struct swimcu *swimcup)
 ************/
 static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 {
-	int ret = 0;
 	enum mci_protocol_status_code_e rc;
-	enum mci_protocol_hw_timer_state_e timer_state;
-	enum wusrc_index wi;
-	struct mci_wakeup_source_config_s wu_config;
-	int gpio, ext_gpio;
-	int gpio_cnt = 0;
-	uint32_t wu_pin_bits = 0;
-	u16 wu_source = 0;
-	enum swimcu_adc_index adc_wu_src = SWIMCU_ADC_INVALID;
-	enum swimcu_adc_compare_mode adc_compare_mode;
-	int adc_bitmask;
-	uint32_t timeout;
+	struct swimcu_wusrc_config_state_s cfg_state = {0};
 	bool watchdog_disabled = false;
+	int ret = 0;
+
+	enum mci_protocol_hw_timer_state_e timer_state;
+	uint32_t timeout = 0;
 
 	if ((pm < SWIMCU_PM_OFF) || (pm > SWIMCU_PM_MAX))
 	{
@@ -1051,7 +1704,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	if (pm == SWIMCU_PM_PSM_REQUEST ||
 	    pm == SWIMCU_PM_PSM_IN_PROGRESS ||
 	    pm == SWIMCU_PM_BOOT_SOURCE) {
-		swimcu_log(PM, "%s: PSM request in progress\n",__func__);
+		swimcu_log(PM, "%s: PSM request in progress %d\n",__func__, pm);
 		return 0;
 	}
 
@@ -1061,105 +1714,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		return -EIO;
 	}
 
-	if ((pm == SWIMCU_PM_PSM_SYNC) || (pm == SWIMCU_PM_ULPM_FALLBACK)) {
-		/* setup GPIO and ADC wakeup sources */
-		for( wi = 0; wi < ARRAY_SIZE(wusrc_param); wi++ ) {
-			if( wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS ) {
-				gpio = wusrc_param[wi].id;
-				if (swimcu_pm_wusrc_gpio_irq_get(gpio) != MCI_PIN_IRQ_DISABLED)
-				{
-					ret = swimcu_gpio_set(swimcu,
-						SWIMCU_GPIO_SET_EDGE, gpio, swimcu_pm_wusrc_gpio_irq_get(gpio));
-					if (ret < 0) {
-						pr_err("%s: irqc set fail %d\n", __func__, gpio);
-						goto wu_fail;
-					}
-
-					swimcu_log(PM, "%s: configure GPIO %d as wakeup source \n",__func__, gpio);
-					wu_pin_bits |= wusrc_param[wi].mask;
-					gpio_cnt++;
-				}
-			} else if (MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC == wusrc_param[wi].type &&
-				   adc_trigger_config[wusrc_param[wi].id].select) {
-					adc_wu_src = wusrc_param[wi].id;
-					adc_bitmask = wusrc_param[wi].mask;
-			}
-		}
-
-		if (gpio_cnt > 0) {
-			wu_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS;
-			wu_config.args.pins = wu_pin_bits;
-			if( MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
-				(rc = swimcu_wakeup_source_config(swimcu, &wu_config,
-				MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET))) {
-				pr_err("%s: ext pin wu fail %d\n", __func__, rc);
-				ret = -EIO;
-				goto wu_fail;
-			}
-			wu_source |= (u16)MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS;
-			swimcu_log(PM, "%s: wu on pins 0x%x\n", __func__, wu_pin_bits);
-		}
-
-		if (swimcu_wakeup_time > 0)
-		{
-			wu_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
-
-			/* wakeup time has been validated upon user input (in seconds)
-			*  which garantees no overflow in the following calculation.
-			*/
-			wu_config.args.timeout =
-				swimcu_mdm_sec_to_mcu_time_ms(swimcu, swimcu_wakeup_time);
-
-			swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_EXPECTED_ULPM_TIME] = swimcu_wakeup_time;
-
-			if( MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
-				(rc = swimcu_wakeup_source_config(swimcu, &wu_config,
-				MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET)) )
-			{
-				pr_err("%s: timer wu fail %d\n", __func__, rc);
-				ret = -EIO;
-				goto wu_fail;
-			}
-			wu_source |= (u16)MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
-			swimcu_log(PM, "%s: wu on timer %u (mcu=%u)\n",
-				__func__, swimcu_wakeup_time, wu_config.args.timeout);
-		}
-
-		if (SWIMCU_ADC_INVALID != adc_wu_src) {
-			wu_config.source_type = MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC;
-			wu_config.args.channel = adc_bitmask;
-
-			swimcu_adc_set_trigger_mode(adc_wu_src,
-						   MCI_PROTOCOL_ADC_TRIGGER_MODE_HW,
-					           adc_interval);
-			/*
-			* if above > below, then trigger when value falls in the range (0, below) or (above, 1800)
-			* if above <= below, trigger when value falls in the range (above, below)
-			*/
-			if (adc_trigger_config[adc_wu_src].above >
-				adc_trigger_config[adc_wu_src].below) {
-				adc_compare_mode = MCI_PROTOCOL_ADC_COMPARE_MODE_BEYOND;
-			} else {
-				adc_compare_mode = MCI_PROTOCOL_ADC_COMPARE_MODE_WITHIN;
-			}
-			swimcu_adc_set_compare_mode(adc_wu_src,
-						    adc_compare_mode,
-						    adc_trigger_config[adc_wu_src].above,
-						    adc_trigger_config[adc_wu_src].below);
-			swimcu_adc_init_and_start(swimcu, adc_wu_src);
-
-			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS !=
-				(rc = swimcu_wakeup_source_config(swimcu, &wu_config,
-					MCI_PROTOCOL_WAKEUP_SOURCE_OPTYPE_SET))) {
-				pr_err("%s: adc wu fail %d\n", __func__, rc);
-				ret = -EIO;
-				goto wu_fail;
-			}
-			wu_source |= (u16)MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_ADC;
-			swimcu_log(PM, "%s: wu on adc %d\n", __func__, adc_wu_src);
-		}
-
-	}
+	swimcu_log(PM, "%s: process pm option %d\n", __func__, pm);
 
 	if (swimcu_watchdog_enable == SWIMCU_ENABLE)
 	{
@@ -1176,125 +1731,73 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		}
 	}
 
-	if ((wu_source != 0) || (pm == SWIMCU_PM_POWER_SWITCH) || (pm == SWIMCU_PM_PSM_SYNC)) {
-
-		if (pm == SWIMCU_PM_PSM_SYNC)
+	/* Wakeup source must be configured except the software power down case */
+	if (pm != SWIMCU_PM_POWER_SWITCH)
+	{
+		ret = swimcu_pm_wusrc_config(swimcu, pm, &cfg_state);
+		if (ret != 0)
 		{
-			pr_info("%s: user-selected psm sync option %d\n", __func__, swimcu_psm_sync_select);
+			goto ULPM_CONFIG_FAILED;
+		}
+		pr_err("%s: wakeup source setup mask=0x%x\n", __func__, cfg_state.wusrc_mask);
+	}
 
-			/* select default sync option if none is specified by user */
-			if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
-			{
-				swimcu_psm_sync_select = swimcu_pm_psm_sync_option_default(swimcu);
-				if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
-				{
-					pr_err("%s: no PSM synchronization support\n", __func__);
-					ret = -EPERM;
-					goto wu_fail;
-				}
-			}
 
-			if (swimcu_psm_sync_select != MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A)
-			{
-				/* attempt to read remaining PSM time if sync option A is not specified */
-				timeout = swimcu_pm_psm_time_get();
+	if (!cfg_state.wusrc_mask && (pm != SWIMCU_PM_POWER_SWITCH))
+	{
+		pr_err("%s: no wake sources set for PSM/ULPM request %d\n", __func__, pm);
+		goto ULPM_CONFIG_FAILED;
+	}
 
-				/* save the PSM time persistent across the ULPM cycle */
-				swimcu_pm_data_group[SWIMCU_PM_DATA_INDEX_EXPECTED_ULPM_TIME] = timeout;
+	/* save the calibration and PSM data before power down */
+	swimcu_pm_data_store(swimcu);
 
-				pr_info("%s: configured psm time %d\n", __func__, timeout);
-				if (timeout > 0)
-				{
-					/* mitigate the risk of LPO clock variation over temperature */
-					timeout *= (100 - SWIMCU_CALIBRATE_TEMPERATURE_FACTOR);
-					timeout /= 100;
-					pr_err("%s: at floor of tempreture variation %d\n", __func__, timeout);
+	if (pm == SWIMCU_PM_PSM_SYNC)
+	{
+		/* safe shutdown configured */
+		swimcu_pm_state = PM_STATE_SYNC;
 
-					timeout = swimcu_mdm_sec_to_mcu_time_ms(swimcu, timeout);
-					pr_info("%s: device calibration %d\n", __func__, timeout);
-				}
-				else
-				{
-					/* fall back to sync option A with invalid zero PSM time*/
-					pr_err("%s: cannot get PSM time--fall back to option A\n", __func__);
-					swimcu_psm_sync_select = MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A;
-				}
-			}
-			else
-			{
-				timeout = 0;
-			}
-
-			pr_info("%s: sending psm_sync_config sync option %d max_wait %u psm time %u\n",
-				__func__, swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
-			rc = swimcu_psm_sync_config(swimcu,
-				swimcu_psm_sync_select, SWIMCU_PM_WAIT_SYNC_TIME, timeout);
-			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS != rc)
-			{
-				pr_err("%s: cannot config MCU for PSM synchronization %d\n", __func__, rc);
-				ret = -EIO;
-				goto wu_fail;
-			}
-
-			if (timeout > 0)
-			{
-				wu_source |= MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
-			}
+		/* In option A, MCU always on forever to wait for MDM message */
+		if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_A)
+		{
+			cfg_state.wusrc_mask &= ~MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_TIMER;
+		}
+	}
+	else
+	{
+		pr_info("%s: sending wait_time_config", __func__);
+		rc = swimcu_pm_wait_time_config(swimcu, SWIMCU_PM_WAIT_SYNC_TIME, 0);
+		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == rc)
+		{
 			swimcu_pm_state = PM_STATE_SYNC;
 		}
-		else
+		else if (MCI_PROTOCOL_STATUS_CODE_UNKNOWN_COMMAND == rc)
 		{
-			pr_info("%s: sending wait_time_config", __func__);
-			rc = swimcu_pm_wait_time_config(swimcu, SWIMCU_PM_WAIT_SYNC_TIME, 0);
-
-			if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == rc)
-			{
-				swimcu_pm_state = PM_STATE_SYNC;
-			}
-			else if (MCI_PROTOCOL_STATUS_CODE_UNKNOWN_COMMAND == rc)
-			{
-				pr_info("%s: pm wait_time_config not recognized by MCU, \
-					proceed with legacy shutdown\n", __func__);
-				swimcu_pm_state = PM_STATE_SHUTDOWN;
-			}
-		}
-
-		/* save the calibration and PSM data before power down */
-		swimcu_pm_data_store(swimcu);
-
-		pr_info("%s: sending ulpm_config", __func__);
-		rc = pm_ulpm_config(swimcu, wu_source);
-		if (MCI_PROTOCOL_STATUS_CODE_SUCCESS !=rc)
-		{
-			pr_err("%s: pm enable fail %d\n", __func__, rc);
-			ret = -EIO;
-			goto wu_fail;
-		}
-
-		if(PM_STATE_SYNC == swimcu_pm_state) {
-			call_usermodehelper(poweroff_argv[0], poweroff_argv, NULL, UMH_NO_WAIT);
+			pr_info("%s: pm wait_time_config not recognized by MCU, \
+				proceed with legacy shutdown\n", __func__);
+			swimcu_pm_state = PM_STATE_SHUTDOWN;
 		}
 	}
-	else {
-		pr_err("%s: no wake sources set\n", __func__);
-		/* nothing to clean up in this case */
-		return -EPERM;
+
+	pr_info("%s: sending ulpm_config", __func__);
+	rc = pm_ulpm_config(swimcu, cfg_state.wusrc_mask);
+	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS !=rc)
+	{
+		pr_err("%s: pm enable fail %d\n", __func__, rc);
+		ret = -EIO;
+		goto ULPM_CONFIG_FAILED;
 	}
+
+	if(PM_STATE_SYNC == swimcu_pm_state) {
+		call_usermodehelper(poweroff_argv[0], poweroff_argv, NULL, UMH_NO_WAIT);
+	}
+
 	return 0;
 
-wu_fail:
-	/* free any gpio's that have been requested */
-	for( wi = 0; wi < ARRAY_SIZE(wusrc_param); wi++ ) {
-		if( wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS ) {
-			gpio = wusrc_param[wi].id;
-			if (swimcu_pm_wusrc_gpio_irq_get(gpio) !=  MCI_PIN_IRQ_DISABLED) {
-				/* configured for wakeup */
-				ext_gpio = SWIMCU_GPIO_TO_SYS(gpio);
-				gpio_free(ext_gpio);
-				swimcu_log(PM, "%s: free %d\n", __func__, gpio);
-			}
-		}
-	}
+ULPM_CONFIG_FAILED:
+
+	/* reverse the wakeup source configuration */
+	swimcu_pm_wusrc_config_reset(swimcu, &cfg_state);
 
 	if (watchdog_disabled)
 	{
@@ -1315,8 +1818,11 @@ wu_fail:
 	return ret;
 }
 
-/* sysfs entries to set GPIO input as boot_source */
-static ssize_t pm_gpio_attr_show(
+/****************************
+ * SYSFS nodes construction *
+ ****************************/
+/* sysfs entries to set IRQ from GPIO input as boot_source */
+static ssize_t pm_gpio_edge_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	enum wusrc_index wi;
@@ -1336,14 +1842,14 @@ static ssize_t pm_gpio_attr_show(
 
 	irqc_type = swimcu_pm_wusrc_gpio_irq_get(gpio);
 
-	for (ti = ARRAY_SIZE(pin_trigger) - 1; ti > 0; ti--) {
+	for (ti = ARRAY_SIZE(swimcu_irq_type_name_map) - 1; ti > 0; ti--) {
 		/* if never found we exit at ti == 0: "off" */
-		if (irqc_type == pin_trigger[ti].type) {
+		if (irqc_type == swimcu_irq_type_name_map[ti].type) {
 			swimcu_log(PM, "%s: found gpio %d trigger %d\n", __func__, gpio, ti);
 			break;
 		}
 	}
-	ret = scnprintf(buf, PAGE_SIZE, pin_trigger[ti].name);
+	ret = scnprintf(buf, PAGE_SIZE, swimcu_irq_type_name_map[ti].name);
 
 	if (ret > 0) {
 		strlcat(buf, "\n", PAGE_SIZE);
@@ -1353,27 +1859,30 @@ static ssize_t pm_gpio_attr_show(
 	return ret;
 };
 
-static ssize_t pm_gpio_attr_store(struct kobject *kobj,
+
+static ssize_t pm_gpio_edge_attr_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
+	struct swimcu *swimcup;
 	enum wusrc_index wi;
 	int ti;
 	int gpio;
+	int ret;
 
+	/* find associated GPIO number and IRQ type */
 	wi = find_wusrc_index_from_kobj(kobj);
-	if ((wi != WUSRC_INVALID) &&
-		(wusrc_param[wi].type == MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS)) {
-		gpio = wusrc_param[wi].id;
-	}
-	else {
+	if ((wi == WUSRC_INVALID) ||
+		(wusrc_param[wi].type != MCI_PROTOCOL_WAKEUP_SOURCE_TYPE_EXT_PINS))
+	{
 		pr_err("%s: unrecognized GPIO %s\n", __func__, kobj->name);
 		return -EINVAL;
 	}
+	gpio = wusrc_param[wi].id;
 
-	for (ti = ARRAY_SIZE(pin_trigger) - 1; ti >= 0; ti--)
+	for (ti = ARRAY_SIZE(swimcu_irq_type_name_map) - 1; ti >= 0; ti--)
 	{
 		/* if never found we exit at ti == -1: invalid */
-		if (sysfs_streq(buf, pin_trigger[ti].name))
+		if (sysfs_streq(buf, swimcu_irq_type_name_map[ti].name))
 		{
 			if (0 != swimcu_gpio_irq_support_check(gpio))
 			{
@@ -1381,10 +1890,6 @@ static ssize_t pm_gpio_attr_store(struct kobject *kobj,
 				return -EPERM;
 			}
 
-			swimcu_pm_wusrc_gpio_irq_set(gpio, pin_trigger[ti].type);
-			wusrc_value[wi].triggered = 0;
-
-			swimcu_log(PM, "%s: setting gpio %d to trigger %d\n", __func__, gpio, ti);
 			break;
 		}
 	}
@@ -1394,13 +1899,27 @@ static ssize_t pm_gpio_attr_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
+	swimcup = container_of(kobj->parent, struct swimcu, pm_boot_source_kobj);
+	ret = swimcu_gpio_set(swimcup,
+		SWIMCU_GPIO_SET_EDGE, gpio, swimcu_irq_type_name_map[ti].type);
+	if (ret < 0)
+	{
+		pr_err("%s: failed set IRQ for gpio %d ret=%d\n", __func__, gpio, ret);
+		return ret;
+	}
+
+	/* successfully setup the wakeup source */
+	swimcu_pm_wusrc_gpio_irq_set(gpio, swimcu_irq_type_name_map[ti].type);
+	swimcu_pm_wusrc_status[wi].triggered = 0;
+
 	return count;
 };
 
 static ssize_t pm_timer_timeout_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", swimcu_wakeup_time);
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT]);
 }
 
 static ssize_t pm_timer_timeout_attr_store(struct kobject *kobj,
@@ -1412,8 +1931,8 @@ static ssize_t pm_timer_timeout_attr_store(struct kobject *kobj,
 	if (0 == (ret = kstrtouint(buf, 0, &tmp_time))) {
 		if (tmp_time <= SWIMCU_MAX_TIME)
 		{
-			swimcu_wakeup_time = tmp_time;
-			wusrc_value[WUSRC_TIMER].triggered = 0;
+			swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT] = tmp_time;
+			swimcu_pm_wusrc_status[WUSRC_TIMER].triggered = 0;
 			return count;
 		}
 		else
@@ -1433,8 +1952,8 @@ static ssize_t enable_store(struct kobject *kobj,
 	struct swimcu *swimcu = container_of(kobj, struct swimcu, pm_boot_source_kobj);
 
 	ret = kstrtoint(buf, 0, &tmp_enable);
-	if (0 == ret) {
-
+	if (0 == ret)
+	{
 		ret = pm_set_mcu_ulpm_enable(swimcu, tmp_enable);
 		if (0 == ret) {
 			swimcu_pm_enable = tmp_enable;
@@ -1497,8 +2016,9 @@ static ssize_t triggered_show(
 	enum wusrc_index wi = find_wusrc_index_from_kobj(kobj);
 
 	if (wi != WUSRC_INVALID)
-		triggered = wusrc_value[wi].triggered;
-
+	{
+		triggered = swimcu_pm_wusrc_status[wi].triggered;
+	}
 	swimcu_log(PM, "%s: %d = %d\n", __func__, wi, triggered);
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", triggered);
@@ -1532,14 +2052,14 @@ static ssize_t pm_adc_select_attr_store(struct kobject *kobj,
 	}
 
 	for (i = 0; i < SWIMCU_NUM_ADC; i++) {
-		if (select && adc_trigger_config[i].select && (i != adc)) {
+		if (select && swimcu_pm_wusrc_adc_select_get(i) && (i != adc)) {
 			pr_err("%s: cannot select more than 1 adc as boot_source", __func__);
 			ret = -EPERM;
 		}
 	}
 
 	if (!ret) {
-		adc_trigger_config[adc].select = select;
+		swimcu_pm_wusrc_adc_select_set(adc, select);
 		ret = count;
 	}
 	return ret;
@@ -1548,7 +2068,8 @@ static ssize_t pm_adc_select_attr_store(struct kobject *kobj,
 static ssize_t pm_adc_interval_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", adc_interval);
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL]);
 }
 
 static ssize_t pm_adc_interval_attr_store(struct kobject *kobj,
@@ -1559,7 +2080,7 @@ static ssize_t pm_adc_interval_attr_store(struct kobject *kobj,
 
 	if (0 == (ret = kstrtouint(buf, 0, &interval))) {
 		if (interval <= SWIMCU_MAX_TIME) {
-			adc_interval = interval;
+			swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_ADC_INTERVAL] = interval;
 			return count;
 		}
 		else {
@@ -2040,7 +2561,8 @@ static ssize_t swimcu_psm_active_time_attr_store(struct kobject *kobj,
 static ssize_t swimcu_psm_time_attr_show(
 	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", swimcu_wakeup_time);
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT]);
 }
 
 static ssize_t swimcu_psm_time_attr_store(struct kobject *kobj,
@@ -2051,7 +2573,7 @@ static ssize_t swimcu_psm_time_attr_store(struct kobject *kobj,
 	ret = kstrtouint(buf, 0, &tmp_psm_time);
 	if (!ret)
 	{
-		swimcu_wakeup_time = tmp_psm_time;
+		swimcu_pm_data[SWIMCU_PM_DATA_WUSRC_TIMEOUT] = tmp_psm_time;
 		ret = count;
 	} else {
 		ret = -EINVAL;
@@ -2144,7 +2666,7 @@ void swimcu_set_wakeup_source(enum mci_protocol_wakeup_source_type_e type, u16 v
 
 	if (wi != WUSRC_INVALID) {
 		swimcu_log(PM, "%s: %d\n", __func__, wi);
-		wusrc_value[wi].triggered = 1;
+		swimcu_pm_wusrc_status[wi].triggered = 1;
 	}
 	else {
 		pr_err("%s: unknown wakeup pin 0x%x\n", __func__, value);
@@ -2175,8 +2697,8 @@ void swimcu_set_reset_source(enum mci_protocol_reset_source_e value)
 static const struct kobj_attribute pm_gpio_edge_attr[] = {
 	__ATTR(edge,
 		S_IRUGO | S_IWUSR | S_IWGRP,
-		&pm_gpio_attr_show,
-		&pm_gpio_attr_store),
+		&pm_gpio_edge_attr_show,
+		&pm_gpio_edge_attr_store),
 };
 
 static const struct kobj_attribute pm_triggered_attr = __ATTR_RO(triggered);
@@ -2273,11 +2795,11 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		char *name;
 		unsigned int num_cust_kobjs;
 	} boot_source[] = {
-		{&wusrc_value[WUSRC_GPIO36].kobj, &swimcu->pm_boot_source_kobj, pm_gpio_edge_attr, "gpio36", ARRAY_SIZE(pm_gpio_edge_attr)},
-		{&wusrc_value[WUSRC_GPIO38].kobj, &swimcu->pm_boot_source_kobj, pm_gpio_edge_attr, "gpio38", ARRAY_SIZE(pm_gpio_edge_attr)},
-		{&wusrc_value[WUSRC_TIMER].kobj, &swimcu->pm_boot_source_kobj, pm_timer_timeout_attr, "timer", ARRAY_SIZE(pm_timer_timeout_attr)},
-		{&wusrc_value[WUSRC_ADC2].kobj, &swimcu->pm_boot_source_adc_kobj, pm_adc_trig_attr, "adc2", ARRAY_SIZE(pm_adc_trig_attr)},
-		{&wusrc_value[WUSRC_ADC3].kobj, &swimcu->pm_boot_source_adc_kobj, pm_adc_trig_attr, "adc3", ARRAY_SIZE(pm_adc_trig_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_GPIO36].kobj, &swimcu->pm_boot_source_kobj,     pm_gpio_edge_attr,     "gpio36", ARRAY_SIZE(pm_gpio_edge_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_GPIO38].kobj, &swimcu->pm_boot_source_kobj,     pm_gpio_edge_attr,     "gpio38", ARRAY_SIZE(pm_gpio_edge_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_TIMER].kobj,  &swimcu->pm_boot_source_kobj,     pm_timer_timeout_attr, "timer",  ARRAY_SIZE(pm_timer_timeout_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_ADC2].kobj,   &swimcu->pm_boot_source_adc_kobj, pm_adc_trig_attr,      "adc2",   ARRAY_SIZE(pm_adc_trig_attr)},
+		{&swimcu_pm_wusrc_status[WUSRC_ADC3].kobj,   &swimcu->pm_boot_source_adc_kobj, pm_adc_trig_attr,      "adc3",   ARRAY_SIZE(pm_adc_trig_attr)},
 	};
 
 	int i;

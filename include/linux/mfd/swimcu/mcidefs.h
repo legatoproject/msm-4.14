@@ -499,9 +499,8 @@ struct mci_wakeup_source_config_s
   enum mci_protocol_wakeup_source_type_e source_type; /* source type */
   union
   {
-    uint32_t                           pins;     /* external pin (in bitmask) */
-    uint32_t                           timeout;  /* timer wakeup  */
-    uint32_t                           channel;   /* ADC wakeup */
+    uint32_t pins;     /* external pin (in bitmask) for the analog/digital input */
+    uint32_t timeout;  /* timer wakeup  */
   } args;
 };
 
@@ -718,9 +717,9 @@ extern enum mci_protocol_status_code_e
 
 
 extern enum mci_protocol_status_code_e
-  swimcu_appl_data_store(struct swimcu *swimcu, uint32_t index, uint32_t* datap, int count);
+  swimcu_appl_data_store(struct swimcu *swimcu, uint32_t index, uint32_t* datap, uint8_t count);
 
 extern enum mci_protocol_status_code_e
-  swimcu_appl_data_retrieve(struct swimcu *swimcu, uint32_t index, uint32_t * datap, int *data_countp);
+  swimcu_appl_data_retrieve(struct swimcu *swimcu, uint32_t index, uint32_t * datap, uint8_t *data_countp);
 
 #endif  /* MCIDEFS_H */
