@@ -33,6 +33,7 @@
 #define SWIMCU_ENABLE                        1
 
 /* status code for ULPM operations */
+#define SWIMCU_PM_STATUS_ULPM_UNSUPPORTED    (-18)  /* ULPM not supported */
 #define SWIMCU_PM_STATUS_ULPM_FAILED         (-17)  /* Failed to enter ULPS */
 #define SWIMCU_PM_STATUS_WUSRC_CFG_FAILURE   (-16)  /* Failed to configure wakeup source */
 #define SWIMCU_PM_STATUS_NO_WUSRC_CFG        (-15)  /* No wakeup source configured */
@@ -42,6 +43,7 @@
 #define SWIMCU_PM_STATUS_ULPM_REQUESTED      (15)    /* ULPM is requested */
 #define SWIMCU_PM_STATUS_ULPM_FALLBACK       (16)    /* ULPM is requested as fallback from PSM failure */
 #define SWIMCU_PM_STATUS_ULPM_COMPLETED      (17)    /* ULPM Entered ULPS successfully	*/
+#define SWIMCU_PM_STATUS_POWER_OFF           (18)    /* ULPM Entered ULPS successfully */
 
 /* Maximum time value allowed in configuration of MCU functionality
 *  40 days and 40 nights (in seconds).
@@ -349,6 +351,31 @@ static struct timespec swimcu_calibrate_start_tv;
 
 /* status of post-ULPM TOD update */
 static int swimcu_pm_tod_update_status = SWIMCU_CALIBRATE_TOD_UPDATE_FAILED;
+
+/***********************
+* Forward declaration  *
+***********************/
+static void swimcu_pm_opt_sysfs_remove(struct swimcu *swimcup, int func_flags);
+
+/************
+*
+* Name:     swimcu_mcufw_running
+*
+* Purpose:  Test whether MCUFW is running on installed on-board MCU.
+*
+* Parms:    swimcup  - pointer to the swimcu data object
+*
+* Return:   true if MCUFW is running on the installed on-board MCU;
+*           false if no on-board MCU installed, or
+*                    no MCUFW running on the installed on-board MCU
+*
+* Abort:    none
+*
+************/
+static bool swimcu_mcufw_running(struct swimcu *swimcup)
+{
+	return (swimcup->version_major != 0 || swimcup->version_minor != 0);
+}
 
 /*****************************
 * Wakeup sourc configuration *
@@ -1018,6 +1045,12 @@ int pm_reboot_call(
 	uint32_t time_ms;
 	enum mci_protocol_hw_timer_state_e timer_state;
 	struct swimcu* swimcu = container_of(this, struct swimcu, reboot_nb);
+
+	if (!swimcu_mcufw_running(swimcu))
+	{
+		swimcu_log(PM, "%s: No MCU synchronization\n", __func__);
+		return NOTIFY_DONE;
+	}
 
 	if (SYS_POWER_OFF == code)
 	{
@@ -1877,19 +1910,40 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	case SWIMCU_PM_PSM_SYNC:
 
 		/* PSMD Indicated it is ready to sync with MCU for power down */
+		if (!swimcu_mcufw_running(swimcu))
+		{
+			/* Power down now since no MCU to sync the power state with.
+			*  Modem may have shutdown at this point of PSM power off sequence.
+			*  Notify BAM DMUX driver not to treat failure as modem crash.
+			*/
+			pr_info("%s: SWIMCU_PM_PSM_SYNC - power down now\n",__func__);
+			swimcu_pm_state = PM_STATE_SHUTDOWN;
+			msm_bam_dmux_psm_poweroff_set(true);
+			call_usermodehelper(poweroff_argv[0], poweroff_argv, NULL, UMH_NO_WAIT);
+
+			swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_COMPLETED;
+			sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
+
+			return 0;
+		}
+
 		pr_info("%s: SWIMCU_PM_PSM_SYNC - continue sync with MCU\n",__func__);
 		break;
 
 	case SWIMCU_PM_ULPM_ENABLE:
 
-		if (swimcu->version_major == 0 && swimcu->version_minor == 0)
+		if (!swimcu_mcufw_running(swimcu))
 		{
 			/* ULPM is not supported if no MCU installed or no MCUFW running */
 			pr_err("%s: ULPM REQ (%d) is not supported on this module\n",__func__, pm);
+
+			swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_UNSUPPORTED;
+			sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
+
 			return -EINVAL;
 		}
 
-		/* ULPM is not handled by PSM glue-logic */
+		/* ULPM is not handled by PSM glue-logic notify current status */
 		swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_REQUESTED;
 		sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
 
@@ -1899,16 +1953,20 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 	case SWIMCU_PM_POWER_OFF:
 
 		/* User requested system shutdown */
-		if (swimcu->version_major == 0 && swimcu->version_minor == 0)
+		if (!swimcu_mcufw_running(swimcu))
 		{
 			/* Power off now since no MCU installed or MCUFW not running */
 			pr_info("%s: SWIMCU_PM_POWER_OFF - power down now\n",__func__);
 			swimcu_pm_state = PM_STATE_SHUTDOWN;
 			call_usermodehelper(poweroff_argv[0], poweroff_argv, NULL, UMH_NO_WAIT);
+
+			swimcu_pm_status = SWIMCU_PM_STATUS_POWER_OFF;
+			sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
+
 			return 0;
 		}
 
-		/* Continue sync with MCU to power off */
+		pr_info("%s: SWIMCU_PM_POWER_OFF - continue sync with MCU to power off\n",__func__);
 		break;
 
 	default:
@@ -2002,7 +2060,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 		goto ULPM_CONFIG_FAILED;
 	}
 
-	/* notify the glue-logic of the status */
+	/* notify the glue-logic of the success status */
 	swimcu_pm_status = SWIMCU_PM_STATUS_ULPM_COMPLETED;
 	sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
 
@@ -2023,7 +2081,7 @@ static int pm_set_mcu_ulpm_enable(struct swimcu *swimcu, int pm)
 
 ULPM_CONFIG_FAILED:
 
-	/* notify the glue-logic of the status */
+	/* notify the glue-logic of the error status */
 	sysfs_notify(&swimcu->pm_psm_kobj, NULL, "status");
 
 	/* reverse the wakeup source configuration */
@@ -3230,9 +3288,8 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 	module_kobj = kset_find_obj(module_kset, KBUILD_MODNAME);
 	if (!module_kobj) {
-		pr_err("%s: cannot find kobject for module %s\n",
-			__func__, KBUILD_MODNAME);
-		ret = -ENOENT;
+		pr_err("%s: cannot find kobject for module %s\n", __func__, KBUILD_MODNAME);
+		ret = ENOENT;
 		goto sysfs_add_exit;
 	}
 
@@ -3242,22 +3299,19 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		ret = kobject_init_and_add(&swimcu->pm_firmware_kobj, &ktype, module_kobj, "firmware");
 		if (ret) {
-			pr_err("%s: cannot create firmware kobject\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create firmware kobject: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_firmware_kobj, &fw_version_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create version\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create version: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_firmware_kobj, &fw_update_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create update\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create update: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
@@ -3275,20 +3329,17 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		ret = kobject_init_and_add(&swimcu->pm_boot_source_kobj, &ktype, module_kobj, "boot_source");
 		if (ret) {
-			pr_err("%s: cannot create boot_source kobject\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create boot_source kobject: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 		ret = kobject_init_and_add(&swimcu->pm_boot_source_adc_kobj, &ktype, &swimcu->pm_boot_source_kobj, "adc");
 		if (ret) {
-			pr_err("%s: cannot create adc kobject for boot_source\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create adc kobject for boot_source: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 		ret = sysfs_create_file(&swimcu->pm_boot_source_adc_kobj, &pm_adc_interval_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create interval file for adc\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create interval file for adc: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 		/* populate boot_source sysfs tree */
@@ -3296,21 +3347,18 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 			swimcu_log(PM, "%s: create kobj %d for %s", __func__, i, boot_source[i].name);
 			*boot_source[i].kobj = kobject_create_and_add(boot_source[i].name, boot_source[i].kobj_parent);
 			if (!*boot_source[i].kobj) {
-				pr_err("%s: cannot create boot_source kobject for %s\n", __func__, boot_source[i].name);
-				ret = -ENOMEM;
+				pr_err("%s: cannot create boot_source kobject for %s: ret=%d\n", __func__, boot_source[i].name, -ret);
 				goto sysfs_add_exit;
 			}
 			ret = sysfs_create_file(*boot_source[i].kobj, &pm_triggered_attr.attr);
 			if (ret) {
-				pr_err("%s: cannot create triggered file for %s\n", __func__, boot_source[i].name);
-				ret = -ENOMEM;
+				pr_err("%s: cannot create triggered file for %s: ret=%d\n", __func__, boot_source[i].name, -ret);
 				goto sysfs_add_exit;
 			}
 			for (j = 0; j < boot_source[i].num_cust_kobjs; j++) {
 				ret = sysfs_create_file(*boot_source[i].kobj, &boot_source[i].custom_attr[j].attr);
 				if (ret) {
-					pr_err("%s: cannot create custom file for %s\n", __func__, boot_source[i].name);
-					ret = -ENOMEM;
+					pr_err("%s: cannot create custom file for %s: ret=%d\n", __func__, boot_source[i].name, -ret);
 					goto sysfs_add_exit;
 				}
 			}
@@ -3318,52 +3366,17 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		ret = sysfs_create_file(&swimcu->pm_boot_source_kobj, &swimcu_pm_enable_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create enable\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create enable: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_boot_source_kobj, &swimcu_pm_wusrc_clear_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create clear\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create clear: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		kobject_uevent(&swimcu->pm_boot_source_kobj, KOBJ_ADD);
-	}
-
-	if (func_flags & SWIMCU_FUNC_FLAG_PSM) {
-	/* power save mode object */
-		ret = kobject_init_and_add(&swimcu->pm_psm_kobj, &ktype, module_kobj, "psm");
-		if (ret) {
-			pr_err("%s: cannot create PSM kobject\n", __func__);
-			ret = -ENOMEM;
-			goto sysfs_add_exit;
-		}
-
-		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_support_attr.attr);
-		if (ret) {
-			pr_err("%s: cannot create PSM sync support node\n", __func__);
-			ret = -ENOMEM;
-			goto sysfs_add_exit;
-		}
-
-		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_select_attr.attr);
-		if (ret) {
-			pr_err("%s: cannot create PSM sync select node\n", __func__);
-			ret = -ENOMEM;
-			goto sysfs_add_exit;
-		}
-
-		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_enable_attr.attr);
-		if (ret) {
-			pr_err("%s: cannot create PSM sync enable node\n", __func__);
-			ret = -ENOMEM;
-			goto sysfs_add_exit;
-		}
-
-		kobject_uevent(&swimcu->pm_psm_kobj, KOBJ_ADD);
 	}
 
 	if (func_flags & SWIMCU_FUNC_FLAG_CALIBRATE)
@@ -3371,32 +3384,28 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 		ret = kobject_init_and_add(&swimcu->pm_calibrate_kobj, &ktype, module_kobj, "calibrate");
 		if (ret)
 		{
-			pr_err("%s: cannot create CALIBRATE kobject\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create CALIBRATE kobject: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_lpo_calibrate_mcu_time_attr.attr);
 		if (ret)
 		{
-			pr_err("%s: cannot create CALIBRATE mcu timeout node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create CALIBRATE mcu timeout node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_lpo_calibrate_mdm_time_attr.attr);
 		if (ret)
 		{
-			pr_err("%s: cannot create CALIBRATE mdm time node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create CALIBRATE mdm time node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_lpo_calibrate_enable_attr.attr);
 		if (ret)
 		{
-			pr_err("%s: cannot create CALIBRATE calibrate enable node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create CALIBRATE calibrate enable node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
@@ -3416,8 +3425,7 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 			ret = sysfs_create_file(&swimcu->pm_calibrate_kobj, &swimcu_tod_update_attr.attr);
 			if (ret)
 			{
-				pr_err("%s: cannot create CALIBRATE TOD restore node\n", __func__);
-				ret = -ENOMEM;
+				pr_err("%s: cannot create CALIBRATE TOD restore node: ret=%d\n", __func__, -ret);
 				goto sysfs_add_exit;
 			}
 		}
@@ -3427,108 +3435,110 @@ int swimcu_pm_sysfs_init(struct swimcu *swimcu, int func_flags)
 
 		ret = kobject_init_and_add(&swimcu->pm_watchdog_kobj, &ktype, module_kobj, "watchdog");
 		if (ret) {
-			pr_err("%s: cannot create WATCHDOG kobject\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create WATCHDOG kobject: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_watchdog_kobj, &swimcu_watchdog_timeout_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create WATCHDOG timeout node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create WATCHDOG timeout node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_watchdog_kobj, &swimcu_watchdog_reset_delay_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create WATCHDOG reset dealy node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create WATCHDOG reset dealy node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_watchdog_kobj, &swimcu_watchdog_renew_count_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create WATCHDOG renew node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create WATCHDOG renew node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 		ret = sysfs_create_file(&swimcu->pm_watchdog_kobj, &swimcu_watchdog_enable_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create WATCHDOG enable node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create WATCHDOG enable node: ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		kobject_uevent(&swimcu->pm_watchdog_kobj, KOBJ_ADD);
 	}
 
+	/* mandatory nodes in "psm" subdirectory: psm_time, active_time, enable and status */
 	if (func_flags & SWIMCU_FUNC_FLAG_PSM) {
 		ret = kobject_init_and_add(&swimcu->pm_psm_kobj, &ktype, module_kobj, "psm");
 		if (ret) {
-			pr_err("%s: cannot create PSM kobject\n", __func__);
-			ret = -ENOMEM;
-			goto sysfs_add_exit;
-		}
-
-		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_support_attr.attr);
-		if (ret) {
-			pr_err("%s: cannot create PSM sync support node\n", __func__);
-			ret = -ENOMEM;
-			goto sysfs_add_exit;
-		}
-
-		/* set default sync option for the first-time power up */
-		if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
-		{
-			swimcu_psm_sync_select = swimcu_pm_psm_sync_option_default(swimcu);
-		}
-
-		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_select_attr.attr);
-		if (ret) {
-			pr_err("%s: cannot create PSM sync select node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create PSM kobject ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_enable_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create PSM sync enable node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create PSM sync enable node ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_active_time_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create PSM active_time node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create PSM active_time node ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_time_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create PSM psm_time node\n", __func__);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create PSM psm_time node ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_status_attr.attr);
 		if (ret) {
-			pr_err("%s: cannot create PSM status node (ret=%d)\n", __func__, ret);
-			ret = -ENOMEM;
+			pr_err("%s: cannot create PSM status node ret=%d\n", __func__, -ret);
 			goto sysfs_add_exit;
 		}
 
 		kobject_uevent(&swimcu->pm_psm_kobj, KOBJ_ADD);
 	}
 
+	/* optional nodes in "psm" subdirectory: sync_support and sync_select */
+	if (func_flags & SWIMCU_FUNC_FLAG_PSM_SYNC) {
+		/* show sync_support and sync_select nodes only if MCU supported */
+		if (swimcu->opt_func_mask)
+		{
+			if (!swimcu->pm_psm_kobj.state_initialized || !swimcu->pm_psm_kobj.state_in_sysfs) {
+				pr_err("%s: PSM kobject not initialized: ret=%d\n", __func__, -ret);
+				goto sysfs_add_exit;
+			}
+
+			ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_support_attr.attr);
+			if (ret) {
+				pr_err("%s: cannot create PSM sync support node: ret=%d\n", __func__, -ret);
+				goto sysfs_add_exit;
+			}
+
+			/* set default sync option for the first-time power up */
+			if (swimcu_psm_sync_select == MCI_PROTOCOL_PM_PSM_SYNC_OPTION_NONE)
+			{
+				swimcu_psm_sync_select = swimcu_pm_psm_sync_option_default(swimcu);
+			}
+
+			ret = sysfs_create_file(&swimcu->pm_psm_kobj, &swimcu_psm_sync_select_attr.attr);
+			if (ret) {
+				pr_err("%s: cannot create PSM sync select node: ret=%d\n", __func__, -ret);
+				goto sysfs_add_exit;
+			}
+		}
+
+		kobject_uevent(&swimcu->pm_psm_kobj, KOBJ_CHANGE);
+	}
 
 	swimcu_log(INIT, "%s: success func=0x%x\n", __func__, func_flags);
 	return 0;
 
 sysfs_add_exit:
-	swimcu_log(INIT, "%s: fail func=0x%x, ret %d\n", __func__, func_flags, ret);
+	swimcu_log(INIT, "%s: fail func=0x%x, ret %d\n", __func__, func_flags, -ret);
 	swimcu_pm_sysfs_deinit(swimcu);
-	return ret;
+	return -ret;
 }
 
 /************
@@ -3541,7 +3551,7 @@ sysfs_add_exit:
 *           func_flags - bitmask indicates the functions of which the sysfs tree
 *                        to be removed:
 *                        SWIMCU_FUNC_FLAG_WATCHDOG
-*                        SWIMCU_FUNC_FLAG_PSM
+*                        SWIMCU_FUNC_FLAG_PSM_SYNC
 *
 * Return:   0 if successful;
 *           -ERRNO otherwise
@@ -3574,7 +3584,7 @@ static void swimcu_pm_opt_sysfs_remove(struct swimcu *swimcup, int func_flags)
 		kobject_del(&swimcup->pm_watchdog_kobj);
 	}
 
-	if (func_flags & SWIMCU_FUNC_FLAG_PSM) {
+	if (func_flags & SWIMCU_FUNC_FLAG_PSM_SYNC) {
 
 		swimcu_log(INIT, "%s: remove PSM sysfs nodes\n", __func__);
 
@@ -3582,9 +3592,6 @@ static void swimcu_pm_opt_sysfs_remove(struct swimcu *swimcup, int func_flags)
 
 		sysfs_remove_file(&swimcup->pm_psm_kobj, &swimcu_psm_sync_support_attr.attr);
 		sysfs_remove_file(&swimcup->pm_psm_kobj, &swimcu_psm_sync_select_attr.attr);
-		sysfs_remove_file(&swimcup->pm_psm_kobj, &swimcu_psm_enable_attr.attr);
-
-		kobject_del(&swimcup->pm_psm_kobj);
 	}
 }
 
@@ -3643,19 +3650,19 @@ int swimcu_pm_sysfs_opt_update(struct swimcu *swimcup)
 	}
 
 	if (swimcup->opt_func_mask & MCI_PROTOCOL_APPL_OPT_FUNC_PSM_SYNC_ALL) {
-		if (!(swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_PSM)) {
-			ret = swimcu_pm_sysfs_init(swimcup, SWIMCU_FUNC_FLAG_PSM);
+		if (!(swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_PSM_SYNC)) {
+			ret = swimcu_pm_sysfs_init(swimcup, SWIMCU_FUNC_FLAG_PSM_SYNC);
 			if (0 == ret) {
-				swimcup->driver_init_mask |= SWIMCU_DRIVER_INIT_PSM;
+				swimcup->driver_init_mask |= SWIMCU_DRIVER_INIT_PSM_SYNC;
 			} else {
-				dev_err(swimcup->dev, "PSM sysfs init failed\n");
+				dev_err(swimcup->dev, "PSM MCU sync sysfs init failed\n");
 				return ret;
 			}
 		}
 	} else {
-		if (swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_PSM) {
-			swimcu_pm_opt_sysfs_remove(swimcup, SWIMCU_FUNC_FLAG_PSM);
-			swimcup->driver_init_mask &= ~SWIMCU_DRIVER_INIT_PSM;
+		if (swimcup->driver_init_mask & SWIMCU_DRIVER_INIT_PSM_SYNC) {
+			swimcu_pm_opt_sysfs_remove(swimcup, SWIMCU_FUNC_FLAG_PSM_SYNC);
+			swimcup->driver_init_mask &= ~SWIMCU_DRIVER_INIT_PSM_SYNC;
 		}
 	}
 

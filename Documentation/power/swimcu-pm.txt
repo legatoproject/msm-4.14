@@ -1,16 +1,16 @@
 Sierra Wireless MCU Ultra Low Power Management
 	(C) 2016 Sierra Wireless, GPL
 
-V1.03
+V1.04
 
-The Sierra Wireless WP product series are equipped with an on-board
-MCU whose prime function is to allow the system to operate in a very
-low power state (Ultra Low Power State or ULPS). In this state, power
-is removed from the main MDM chip, while the MCU runs at the lowest
-possible current consumption monitoring for configured boot conditions
-When triggered, the MCU then restores power to boot the MDM. The MCU
-provides GPIO and ADC services in support of boot options. This power
-operation mode is referred as Ultra Low Power Mode, or ULPM.
+The Sierra Wireless WP product series may or may not equipped with an
+on-board MCU whose prime function is to allow the system to operate in
+a very low power state (Ultra Low Power State or ULPS). In this state,
+power is removed from the main MDM chip, while the MCU runs at the
+lowest possible current consumption monitoring for configured boot
+conditions. When triggered, the MCU then restores power to boot the MDM.
+The MCU provides GPIO and ADC services in support of boot options. This
+power operation mode is referred as Ultra Low Power Mode, or ULPM.
 
 The Sierra Wireless WP76/77 series also supports Power Saving Mode (PSM).
 PSM is a 3GPP Release 12 feature to improve the power management of User
@@ -24,8 +24,12 @@ access the UE anymore and the UE is free to power off itself or enter
 a low power mode. However, the UE may access the registered network at
 any point of time without Attach procedure.
 
-The MCU kernel driver provides a sysfs interface to query and configure
-the MCU I/O and boot conditions for ULPM and PSM operations.
+On the Sierra Wireless WP76/77 series products, the swimcu-pm kernel
+driver provides a set of sysfs nodes, in '/sys/module/swimcu_pm/psm/'
+branch, to query and to configure PSM operations. If a WP product has
+an on-board MCU installed, the kernel driver also provides a set of
+sysfs nodes, in '/sys/module/swimcu_pm/boot_source/' branch, to query
+and configure boot conditions from ULPM.
 
 
 1. GPIO
@@ -157,6 +161,7 @@ are provided for PSM configuration:
 
 /sys/module/swimcu_pm/psm/status
   (Value     Description
+   -18       ULPM not supported.
    -17       ULPM failed to enter ULPS.
    -16       Failed to configure wakeup sources.
    -15       No wakeup source configured to wake from ULPS.
@@ -184,11 +189,13 @@ are provided for PSM configuration:
     10       PSM client has requested PSM in OOS or LS.
     15       ULPM is requeseted.
     16       ULPM is requeseted as fallback from PSM failure.
-    17       ULPM Entered Ultra Low Power State successfully.)
+    17       ULPM Entered Ultra Low Power State successfully.
+    18       Powering off.)
 
-I2C messaging handshake is used for MCU to synchronize with the MDM
-power state. Two more sysfs nodes are provided for user to query and
-configure supported synchronization options:
+For a WP76/77 module with an on-board MCU, I2C messaging handshake is
+used for the on-board MCU to synchronize with the MDM power state. Two
+more sysfs nodes are provided for user to query and configure supported
+synchronization options:
 
 /sys/module/swimcu_pm/psm/sync_support
   (Bit mask shows the options of synchronization settings supported by MCU.
@@ -209,39 +216,49 @@ configure supported synchronization options:
    2 - Option B, average current during PSM:  ~22.5uA
    3 - Option C, average current during PSM:   ~6.9uA)
 
-Besides the timer boot condition, the GPIO and ADC wakeup sources can
-also be configure as boot conditions to wake from PSM.
+For WP76/77 modules with on-board MCU, besides the timer boot condition,
+the GPIO and ADC wakeup sources can also be configure as boot conditions
+to wake from PSM.
 
 
 5. PSM with ULPM fallback
 ==========================
 
-An option is provided for user to request PSM with ULPM as fallback.
-When this option is requested, a PSM request is sent to a registered
-network. If the PSM request is honored by the network, autonomous PSM
-will occur. If the PSM request is rejected by the netwrok, a ULPM
-operation will start immediately. As a result, the MDM will be powered
-off immediately with a timer boot condition, configured with the PSM
-time (T3412 value) as the timeout value. Any other GPIO and ADC boot
-condition configured for the PSM will also take effect for the ULPM.
-On exit from ULPM, a normal Attach procedure will be performed between
-UE and NW.
+For WP76/77 modules with on-board MCU, an option is provided for user
+to request PSM with ULPM as fallback. When this option is requested,
+a PSM request is sent to a registered network. If the PSM request is
+honored by the network, autonomous PSM will occur. If the PSM request
+is rejected by the netwrok, a ULPM operation will start immediately.
+As a result, the MDM will be powered off immediately with a timer boot
+condition, configured with the PSM time (T3412 value) as the timeout
+value. Any other GPIO and ADC boot condition configured for the PSM
+will also take effect for the ULPM. On exit from ULPM, a normal Attach
+procedure will be performed between UE and NW.
 
-Note the following sysfs node pairs are alias to each other:
+For WP76/77 modules with on-board MCU, following sysfs node pairs are
+alias to each other:
 
 	'/sys/module/swimcu_pm/psm/psm_time'
 and
 	'/sys/module/swimcu_pm/boot_source/timer/timeout'
 
-	'sys/module/swimcu_pm/psm/enable'
+	'/sys/module/swimcu_pm/psm/enable'
 and
 	'/sys/module/swimcu_pm/boot_source/enable'
+
+For WP76/77 modules without on-board MCU, the 'boot_source' branch of
+the swimcu_pm, '/sys/module/swimcu_pm/boot_source', will be trimmed, 
+as the GPIO and ADC wakeup sources are not longer avaiable. Therefore,
+it is recommended to use the sysfs nodes under the 'psm' branch,
+'sys/module/swimcu_pm/psm/", to set the timeout value and to request
+power operation modes.
 
 
 6. MCU Firmware Version
 ==========================
 
-The current MCU firmware version may be queried from:
+For WP76/77 modules with on-board MCU, the current MCU firmware version
+may be queried from:
 	/sys/module/swimcu_pm/boot_source/firmware/version
 As noted with boot_source, if this sysfs node is not present, that
 indicates that the MCU failed to initialize when the kernel booted

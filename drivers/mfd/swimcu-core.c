@@ -25,6 +25,7 @@
 #include <linux/workqueue.h>
 #include <linux/notifier.h>
 #include <linux/reboot.h>
+#include <linux/atomic.h>
 
 #include <linux/mfd/swimcu/core.h>
 #include <linux/mfd/swimcu/gpio.h>
@@ -290,15 +291,25 @@ int swimcu_adc_init_and_start(struct swimcu *swimcu, enum swimcu_adc_index adc)
  ************/
 static void swimcu_reset_recovery( struct swimcu *swimcu )
 {
-	swimcu->adc_init_mask = 0;   /* re-init ADC before next access */
 	if (swimcu_fault_count < SWIMCU_FAULT_COUNT_MAX) {
-		swimcu_device_init(swimcu);
-		swimcu_gpio_refresh(swimcu); /* restore MCU with last gpio config */
-		swimcu_set_fault_mask(SWIMCU_FAULT_RESET);
-		swimcu_log(INIT, "%s: complete\n", __func__);
+		/* A power reset event is also delivered on device powerup. It is not
+		*  really a fault and should not trigger another device initialization
+		*  parallel to the normal one triggered by swimcu_i2c_probe().
+		*/
+		if (0 == swimcu_device_init(swimcu))
+		{
+			swimcu->adc_init_mask = 0;   /* re-init ADC before next access */
+			swimcu_gpio_refresh(swimcu); /* restore MCU with last gpio config */
+			swimcu_set_fault_mask(SWIMCU_FAULT_RESET);
+			swimcu_log(INIT, "%s: swimcu_reset_recovery complete\n", __func__);
+		}
+		else
+		{
+			swimcu_log(INIT, "%s: swimcu_reset_recovery skipped\n", __func__);
+		}
 	}
 	else {
-		swimcu_log(INIT, "%s: suspended\n", __func__);
+		swimcu_log(INIT, "%s: suspended (too many fault resets)\n", __func__);
 	}
 }
 
@@ -638,15 +649,24 @@ static void swimcu_vbus_detect_disable(
  */
 int swimcu_device_init(struct swimcu *swimcu)
 {
+	/* To prevent parallel device initialization */
+	static atomic_t device_init_in_progress = ATOMIC_INIT(0);
+
 	int ret;
 	struct swimcu_platform_data *pdata = dev_get_platdata(swimcu->dev);
 	enum bshwtype hwtype;
 	uint8_t hwrev;
 
+	if (0 != atomic_xchg(&device_init_in_progress, 1))
+	{
+		swimcu_log(INIT, "%s: device initialization already in progress\n", __func__);
+		return -EPERM;
+	}
+
 	if (NULL == pdata) {
 		ret = -EINVAL;
 		pr_err("%s: no pdata, aborting\n", __func__);
-		return ret;
+		goto exit;
 	}
 	swimcu_log(INIT, "%s: start 0x%x\n", __func__, swimcu->driver_init_mask);
 
@@ -676,6 +696,19 @@ int swimcu_device_init(struct swimcu *swimcu)
 			else {
 				swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_ADC;
 			}
+		}
+	}
+
+	swimcu_log(INIT, "%s: start 0x%x\n", __func__, swimcu->driver_init_mask);
+
+	/* always initializa PSM interface once and only once */
+	if (!(swimcu->driver_init_mask & SWIMCU_DRIVER_INIT_PSM)) {
+		swimcu->driver_init_mask |= SWIMCU_DRIVER_INIT_PSM;
+		ret = swimcu_pm_sysfs_init(swimcu, SWIMCU_FUNC_FLAG_PSM);
+		if (ret != 0) {
+			dev_err(swimcu->dev, "PSM sysfs init failed: %d\n", ret);
+			swimcu->driver_init_mask &= ~SWIMCU_DRIVER_INIT_PSM;
+			goto exit;
 		}
 	}
 
@@ -787,11 +820,19 @@ int swimcu_device_init(struct swimcu *swimcu)
 		goto exit;
 	}
 
-	swimcu_log(INIT, "%s: success 0x%x\n", __func__, swimcu->driver_init_mask);
-	return 0;
+	ret = 0;
 
 exit:
-	swimcu_log(INIT, "%s: abort 0x%x\n", __func__, swimcu->driver_init_mask);
+	if (ret)
+	{
+		swimcu_log(INIT, "%s: device init abort (ret=%d)\n", __func__, ret);
+	}
+	else
+	{
+		swimcu_log(INIT, "%s: device init success\n", __func__);
+	}
+
+	atomic_xchg(&device_init_in_progress, 0);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(swimcu_device_init);

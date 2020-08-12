@@ -30,7 +30,7 @@
 #define SWIMCU_PM_OFF                 0  /* To request turning off PSM and ULPM */
 #define SWIMCU_PM_PSM_ULPM_FALLBACK   1  /* To request PSM with ULPM fallback */
 #define SWIMCU_PM_POWER_OFF           2  /* To request power off (enter ULPS without user wakeup sources) */
-#define SWIMCU_PM_PSM_SYNC            3  /* To indicate PSM ready for power off synchronization (by PSMD) */
+#define SWIMCU_PM_PSM_SYNC            3  /* To indicate PSM ready for power off synchronization (by PSMD only) */
 #define SWIMCU_PM_NONE                4  /* No request */
 #define SWIMCU_PM_PSM_ENABLE          5  /* To request PSM with user-defined wakeup sources*/
 #define SWIMCU_PM_ULPM_ENABLE         6  /* To request ULPM with user-defined wakeup sources */
@@ -66,6 +66,7 @@ enum swimcu_adc_compare_mode
 #define SWIMCU_FUNC_FLAG_WATCHDOG    (1 << 3)
 #define SWIMCU_FUNC_FLAG_PSM         (1 << 4)
 #define SWIMCU_FUNC_FLAG_CALIBRATE   (1 << 5)
+#define SWIMCU_FUNC_FLAG_PSM_SYNC    (1 << 6)
 
 #define SWIMCU_FUNC_APPL             (SWIMCU_FUNC_FLAG_FWUPD | \
                                       SWIMCU_FUNC_FLAG_PM |    \
@@ -79,7 +80,7 @@ enum swimcu_adc_compare_mode
 
 #define SWIMCU_FUNC_OPTIONAL         (SWIMCU_FUNC_FLAG_WATCHDOG | \
                                       SWIMCU_FUNC_FLAG_CALIBRATE | \
-                                      SWIMCU_FUNC_FLAG_PSM)
+                                      SWIMCU_FUNC_FLAG_PSM_SYNC)
 
 #define SWIMCU_DRIVER_INIT_FIRST     0
 #define SWIMCU_DRIVER_INIT_EVENT     (1 << 0)
@@ -93,6 +94,7 @@ enum swimcu_adc_compare_mode
 #define SWIMCU_DRIVER_INIT_PSM       (1 << 8)
 #define SWIMCU_DRIVER_INIT_CALIBRATE (1 << 9)
 #define SWIMCU_DRIVER_INIT_PANIC     (1 << 10)
+#define SWIMCU_DRIVER_INIT_PSM_SYNC  (1 << 11)
 
 #define SWIMCU_DEBUG
 
