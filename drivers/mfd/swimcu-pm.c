@@ -2464,7 +2464,7 @@ static ssize_t version_show(
 	struct swimcu *swimcu = container_of(kobj, struct swimcu, pm_firmware_kobj);
 
 	if (MCI_PROTOCOL_STATUS_CODE_SUCCESS == swimcu_ping(swimcu)) {
-	  (void) swimcu_pm_sysfs_opt_update(swimcu);
+		(void) swimcu_pm_sysfs_opt_update(swimcu);
 	}
 
 	return scnprintf(buf, PAGE_SIZE, "%03d.%03d\n", swimcu->version_major, swimcu->version_minor);
