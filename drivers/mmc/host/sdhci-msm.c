@@ -1790,7 +1790,6 @@ static int sdhci_msm_pm_qos_parse_irq(struct device *dev,
 {
 	struct device_node *np = dev->of_node;
 	const char *str;
-	u32 cpu;
 	int ret = 0;
 	int i;
 
