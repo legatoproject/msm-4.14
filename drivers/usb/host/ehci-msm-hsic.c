@@ -2049,7 +2049,11 @@ static int ehci_hsic_msm_probe(struct platform_device *pdev)
 		goto put_parent;
 	}
 
+#ifdef CONFIG_SIERRA
+	hcd_to_bus(hcd)->skip_resume = false;
+#else
 	hcd_to_bus(hcd)->skip_resume = true;
+#endif
 
 	hcd->irq = platform_get_irq(pdev, 0);
 	if (hcd->irq < 0) {
@@ -2404,6 +2408,9 @@ static int msm_hsic_pm_suspend(struct device *dev)
 
 	dbg_log_event(NULL, "PM Suspend", 0);
 
+#ifdef CONFIG_SIERRA
+	msm_hsic_suspend(mehci);
+#endif
 	if (!atomic_read(&mehci->in_lpm)) {
 		dev_info(dev, "abort suspend\n");
 		dbg_log_event(NULL, "PM Suspend abort", 0);
