@@ -248,7 +248,7 @@ static int alloc_prefetch_info(
 		if (!info)
 			return -ENOMEM;
 
-		err = get_user(info->size, ((u64 __user *)user_sizes + i));
+		err = get_user(info->size, ((u64 __user *)&user_sizes + i));
 		if (err)
 			goto out_free;
 
@@ -283,7 +283,7 @@ static int __ion_system_secure_heap_resize(struct ion_heap *heap, void *ptr,
 
 	for (i = 0; i < data->nr_regions; i++) {
 		ret = alloc_prefetch_info(
-			(struct ion_prefetch_regions *)data->regions + i,
+			(struct ion_prefetch_regions *)&data->regions + i,
 			shrink, &items);
 		if (ret)
 			goto out_free;

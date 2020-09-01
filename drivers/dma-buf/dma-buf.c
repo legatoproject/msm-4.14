@@ -1463,7 +1463,7 @@ static void write_proc(struct seq_file *s, struct dma_proc *proc)
 	struct dma_info *tmp;
 	int i;
 
-	seq_printf(s, "\n%s (PID %d) size: %ld\nDMA Buffers:\n",
+	seq_printf(s, "\n%s (PID %d) size: %zu\nDMA Buffers:\n",
 		proc->name, proc->pid, proc->size);
 	seq_printf(s, "%-8s\t%-8s\t%-8s\n",
 		"Name", "Size (KB)", "Time Alive (sec)");
@@ -1473,7 +1473,7 @@ static void write_proc(struct seq_file *s, struct dma_proc *proc)
 		ktime_t elapmstime = ktime_ms_delta(ktime_get(), dmabuf->ktime);
 
 		elapmstime = ktime_divns(elapmstime, MSEC_PER_SEC);
-		seq_printf(s, "%-8s\t%-8ld\t%-8lld\n",
+		seq_printf(s, "%-8s\t%-8zu\t%-8lld\n",
 				dmabuf->buf_name,
 				dmabuf->size / SZ_1K,
 				elapmstime);
