@@ -79,24 +79,6 @@
 					<86 512 500 800>;
 		status = "disabled";
 	};
-
-	usb_detect: usb_detect {
-		compatible = "linux,extcon-usb-gpio";
-		vbus-gpio = <&pm8019_gpios 2 0>;
-
-		pinctrl-names = "default";
-		pinctrl-0 = <&usb_vbus_detect>;
-	};
-};
-
-&pm8019_gpios {
-	usb_vbus_detect: usb_vbus_detect{
-			pins = "gpio2";
-			function = "normal";
-			input-enable;
-			bias-pull-down;
-			power-source = <1>;
-	};
 };
 
 &usb_otg {
@@ -106,8 +88,6 @@
 	/delete-property/ qcom,usbid-gpio;
 	/delete-property/ pinctrl-names;
 	/delete-property/ pinctrl-0;
-	extcon = <&usb_detect>;
-	status = "ok";
 };
 
 &hsic_host {
