@@ -2459,8 +2459,22 @@ static void isr_resume_handler(struct ci13xxx *udc)
  */
 static void isr_suspend_handler(struct ci13xxx *udc)
 {
+#ifndef CONFIG_SIERRA
 	if (udc->gadget.speed != USB_SPEED_UNKNOWN &&
 		udc->vbus_active) {
+#else
+/*
+ * If USB is not connected on power up, gadget.speed will be
+ * set to USB_SPEED_UNKNOWN and the phy driver will prevent the system
+ * from suspending. Set the speed here and allow the suspend handler
+ * to continue.
+ */
+	if(udc->vbus_active) {
+		if(udc->gadget.speed == USB_SPEED_UNKNOWN) {
+			udc->gadget.speed = hw_port_is_high_speed() ?
+				USB_SPEED_HIGH : USB_SPEED_FULL;
+		}
+#endif /* CONFIG_SIERRA */
 		if (udc->suspended == 0) {
 			spin_unlock(udc->lock);
 			udc->driver->suspend(&udc->gadget);

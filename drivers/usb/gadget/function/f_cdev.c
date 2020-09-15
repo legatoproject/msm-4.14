@@ -2037,6 +2037,15 @@ static struct usb_function *cser_alloc(struct usb_function_instance *fi)
 	struct f_cdev *port = opts->port;
 
 	port->port_usb.func.name = "cser";
+	if (!strcmp(opts->func_name, "dun"))
+	{
+		port->port_usb.func.name = "modem";
+	}
+	else if (!strcmp(opts->func_name, "nmea"))
+	{
+		port->port_usb.func.name = "nmea";
+	}
+
 	port->port_usb.func.strings = usb_cser_strings;
 	port->port_usb.func.bind = usb_cser_bind;
 	port->port_usb.func.unbind = usb_cser_unbind;

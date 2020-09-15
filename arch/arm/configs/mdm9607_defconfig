@@ -426,3 +426,6 @@ CONFIG_IMA_TRUSTED_KEYRING=y
 
 # Do not allow Sierra Wireless keystore by default.
 # CONFIG_KEYS_KEYSTORE is not set
+
+# Sierra USB
+CONFIG_SIERRA_USB_COMP=y

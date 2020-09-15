@@ -22,6 +22,12 @@
 #include "u_data_ipa.h"
 #include "configfs.h"
 
+#ifdef CONFIG_SIERRA
+static unsigned int num_rmnet_swi = 0;
+module_param(num_rmnet_swi, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(num_rmnet_swi, "Number of rmnet interfaces to enumerate");
+#endif /* CONFIG_SIERRA */
+
 #define RMNET_NOTIFY_INTERVAL	5
 #define RMNET_MAX_NOTIFY_SIZE	sizeof(struct usb_cdc_notification)
 
@@ -1164,6 +1170,11 @@ static struct usb_function *frmnet_bind_config(struct usb_function_instance *fi)
 	struct usb_function	*f;
 	int ret;
 
+#ifdef CONFIG_SIERRA
+	/* pass num_rmnet_swi using iInterface */
+	rmnet_string_defs[0].s = kasprintf(GFP_ATOMIC, "rmnet-qmap-%d",
+					num_rmnet_swi);
+#endif /* CONFIG_SIERRA */
 	opts = container_of(fi, struct f_rmnet_opts, func_inst);
 	opts->refcnt++;
 	dev = opts->dev;

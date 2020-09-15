@@ -22,6 +22,10 @@
 #include <linux/usb/otg.h>
 #include <asm/unaligned.h>
 
+#ifdef CONFIG_SIERRA_USB_COMP
+#include <linux/usb/sierra_ududefs.h>
+#endif
+
 #include "u_os_desc.h"
 
 /**
@@ -435,11 +439,30 @@ int usb_interface_id(struct usb_configuration *config,
 	unsigned id = config->next_interface_id;
 
 	if (id < MAX_CONFIG_INTERFACES) {
+#ifdef CONFIG_SIERRA_USB_COMP
+		/* Obtain Interface Number Desired
+		Allow existing next_interface_id to continue counting
+		That is used elsewhere for total number of interfaces in configuration
+		*/
+		unsigned swi_id;
+		swi_id = ud_get_interface_number( function->name, config );
+		if(UD_INVALID_INTERFACE == swi_id)
+			/* fall back to use sequential interface number */
+			swi_id = id;
+
+		config->interface[swi_id] = function;
+		if (function->intf_id < 0)
+			function->intf_id = swi_id;
+
+		config->next_interface_id = id + 1;
+		return swi_id;
+#else
 		config->interface[id] = function;
 		if (function->intf_id < 0)
 			function->intf_id = id;
 		config->next_interface_id = id + 1;
 		return id;
+#endif
 	}
 	return -ENODEV;
 }
@@ -929,8 +952,14 @@ static int set_config(struct usb_composite_dev *cdev,
 		struct usb_function	*f = c->interface[tmp];
 		struct usb_descriptor_header **descriptors;
 
+#ifdef CONFIG_SIERRA_USB_COMP
+/* Our Interface numbers are not sequential, allow continuing when one is not used */
+		if (!f)
+			continue;
+#else
 		if (!f)
 			break;
+#endif
 
 		/*
 		 * Record which endpoints are used by the function. This is used
