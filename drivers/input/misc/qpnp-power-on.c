@@ -2222,6 +2222,7 @@ static int qpnp_pon_read_hardware_info(struct qpnp_pon *pon, bool sys_reset)
 			 to_spmi_device(dev->parent)->usid,
 			 qpnp_poff_reason[index]);
 	}
+	poff_reason = index;
 
 	if ((pon->pon_trigger_reason == PON_SMPL ||
 		pon->pon_power_off_reason == QPNP_POFF_REASON_UVLO) &&

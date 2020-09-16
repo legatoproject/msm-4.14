@@ -122,6 +122,11 @@ EXPORT_SYMBOL(boot_reason);
 unsigned int cold_boot;
 EXPORT_SYMBOL(cold_boot);
 
+#ifdef CONFIG_INPUT_QPNP_POWER_ON
+unsigned int poff_reason;
+EXPORT_SYMBOL(poff_reason);
+#endif
+
 #ifdef MULTI_CPU
 struct processor processor __ro_after_init;
 #if defined(CONFIG_BIG_LITTLE) && defined(CONFIG_HARDEN_BRANCH_PREDICTOR)

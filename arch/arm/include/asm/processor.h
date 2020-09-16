@@ -32,6 +32,9 @@
 
 extern unsigned int boot_reason;
 extern unsigned int cold_boot;
+#ifdef CONFIG_INPUT_QPNP_POWER_ON
+extern unsigned int poff_reason;
+#endif
 
 struct debug_info {
 #ifdef CONFIG_HAVE_HW_BREAKPOINT

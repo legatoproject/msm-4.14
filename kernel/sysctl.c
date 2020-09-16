@@ -1403,6 +1403,16 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
+#if defined(CONFIG_INPUT_QPNP_POWER_ON)
+	{
+		.procname       = "poweroff_reason",
+		.data           = &poff_reason,
+		.maxlen         = sizeof(int),
+		.mode           = 0444,
+		.proc_handler   = proc_dointvec,
+       },
+#endif
+
 #endif
 	{ }
 };
