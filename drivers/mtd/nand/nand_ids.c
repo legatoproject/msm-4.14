@@ -57,6 +57,12 @@ struct nand_flash_dev nand_flash_ids[] = {
 	{"NM1484KSLAXAJ-3B 4G 1.8V 8-bit",
 		{ .id = {0x98, 0xac, 0x90, 0x26, 0x76, 0x00, 0x00, 0x00} },
 		  SZ_4K, SZ_512, SZ_256K, 0, 5, 256, NAND_ECC_INFO(8, SZ_512) },
+
+/* add Micron MT29F2G08ABBGA3W 2Gb 2k page size */
+	{"MT29F2G08ABBGA3W 2G  1.8V 4-bit",
+		{ .id = {0x2c, 0xaa, 0x90, 0x15, 0x06, 0x00, 0x00, 0x00} },
+		SZ_2K, SZ_256, SZ_128K, 0, 5, 80, NAND_ECC_INFO(8, SZ_512) },
+
 	{"MT29F8G08ABBCAH4 8G 3.3V 8-bit",
 		{ .id = {0x2c, 0xa3, 0x90, 0x26, 0x00, 0x00, 0x00, 0x00} },
 		SZ_4K, SZ_1K, SZ_256K, 0, 4, 224, NAND_ECC_INFO(8, SZ_512)},
