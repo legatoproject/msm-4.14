@@ -40,6 +40,8 @@
 #include <linux/of_device.h>
 #include <linux/wait.h>
 
+#include <linux/sierra_serial.h>
+
 #define UART_MR1			0x0000
 
 #define UART_MR1_AUTO_RFR_LEVEL0	0x3F
@@ -1799,6 +1801,8 @@ static int msm_serial_probe(struct platform_device *pdev)
 		return -ENXIO;
 
 	dev_info(&pdev->dev, "msm_serial: detected port #%d\n", line);
+
+	uart_create_sysfs_config(&pdev->dev);
 
 	port = msm_get_port_from_line(line);
 	port->dev = &pdev->dev;

@@ -66,6 +66,8 @@
 #include <linux/platform_data/msm_serial_hs.h>
 #include <linux/msm-bus.h>
 
+#include <linux/sierra_serial.h>
+
 #include "msm_serial_hs_hwreg.h"
 #define UART_SPS_CONS_PERIPHERAL 0
 #define UART_SPS_PROD_PERIPHERAL 1
@@ -3373,6 +3375,8 @@ static int msm_hs_probe(struct platform_device *pdev)
 
 	if (pdev->dev.of_node)
 		msm_uport->uart_type = BLSP_HSUART;
+
+	uart_create_sysfs_config(&pdev->dev);
 
 	msm_hs_get_pinctrl_configs(uport);
 	/* Get required resources for BAM HSUART */

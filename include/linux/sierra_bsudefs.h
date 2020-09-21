@@ -147,6 +147,30 @@ enum bs_uart_func_e
   BS_UART_FUNC_INVALID  = 0xFF,
 };
 
+static inline const char *bs_uart_func_name(enum bs_uart_func_e f)
+{
+	switch (f) {
+	case BS_UART_FUNC_DISABLED:
+		return "DISABLED";
+	case BS_UART_FUNC_AT:
+		return "AT";
+	case BS_UART_FUNC_DM:
+		return "DM";
+	case BS_UART_FUNC_NMEA:
+		return "NMEA";
+	case BS_UART_FUNC_RS485:
+		return "RS485";
+	case BS_UART_FUNC_RS232_FC:
+		return "RS232_FC";
+	case BS_UART_FUNC_CONSOLE:
+		return "CONSOLE";
+	case BS_UART_FUNC_APP:
+		return "APP";
+	default:
+		return "UNAVAILABLE";
+	}
+}
+
 /************
  *
  * Members:  BS_UART1_LINE - line number of UART1
