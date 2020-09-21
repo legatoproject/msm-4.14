@@ -1672,6 +1672,7 @@ static void msm_console_write(struct console *co, const char *s,
 
 static int __init msm_console_setup(struct console *co, char *options)
 {
+	int idx;
 	struct uart_port *port;
 	int baud = 115200;
 	int bits = 8;
@@ -1681,11 +1682,16 @@ static int __init msm_console_setup(struct console *co, char *options)
 	if (unlikely(co->index >= UART_NR || co->index < 0))
 		return -ENXIO;
 
-	port = msm_get_port_from_line(co->index);
+	for (idx = 0; idx < UART_NR; idx++) {
+		port = msm_get_port_from_line(idx);
+		if (port->membase)
+			break;
+	}
 
-	if (unlikely(!port->membase))
+	if (unlikely(UART_NR <= idx))
 		return -ENXIO;
 
+	co->index = idx;
 	msm_serial_set_mnd_regs(port);
 
 	if (options)
