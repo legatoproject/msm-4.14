@@ -52,4 +52,11 @@ int pil_mss_deassert_resets(struct q6v5_data *drv);
 #ifdef CONFIG_QCOM_MINIDUMP
 int pil_mss_debug_reset(struct pil_desc *pil);
 #endif
+
+#ifdef CONFIG_SIERRA
+extern void ssmem_mpss_up_notification(void);
+#else
+static inline void ssmem_mpss_up_notification(void) { return; }
+#endif
+
 #endif

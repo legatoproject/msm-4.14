@@ -654,6 +654,9 @@ static int pil_mss_reset(struct pil_desc *pil)
 	dev_info(pil->dev, "MBA boot done\n");
 	drv->is_booted = true;
 
+	/* notify ssmem that mpss is going up */
+	ssmem_mpss_up_notification();
+
 	return 0;
 
 err_q6v5_reset:
