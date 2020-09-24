@@ -1204,6 +1204,12 @@ int diag_process_apps_pkt(unsigned char *buf, int len, int pid)
 		msleep(5000);
 		/* call download API */
 		msm_set_restart_mode(RESTART_DLOAD);
+
+		/* Force Sierra boot & hold flag. RESTART_DLOAD will only go to download
+		* mode if download_mode is set
+		*/
+		sierra_smem_boothold_mode_set();
+
 		pr_crit("diag: download mode set, Rebooting SoC..\n");
 		kernel_restart(NULL);
 		/* Not required, represents that command isn't sent to modem */
