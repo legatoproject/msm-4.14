@@ -292,6 +292,23 @@
         };
 };
 
+&pm8019_vadc {
+	/* VADC Channel configuration MPP2 scaling 1/1*/
+	mpp2_div1 {
+		label = "mpp2_div1";
+		reg = <VADC_P_MUX2_1_1>;
+		qcom,pre-scaling = <1 1>;
+		qcom,hw-settle-time = <200>;
+	};
+	/* VADC Channel configuration MPP4 scaling 1/1*/
+	mpp4_div1 {
+		label = "mpp4_div1";
+		reg = <VADC_P_MUX4_1_1>;
+		qcom,pre-scaling = <1 1>;
+		qcom,hw-settle-time = <200>;
+	};
+};
+
 &usb_otg {
 	extcon = <&usb_detect>;
 	status = "ok";
