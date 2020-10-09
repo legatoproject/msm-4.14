@@ -351,6 +351,27 @@ static ssize_t system_debug_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(system_debug);
 
+#ifdef CONFIG_SIERRA
+static ssize_t firmware_load_store(struct device *dev,
+			struct device_attribute *attr, const char *buf,
+			size_t count)
+{
+	const char *p;
+	int orig_count = count;
+
+	p = memchr(buf, '\n', count);
+	if (p)
+		count = p - buf;
+
+	if (!strncasecmp(buf, "1", count) &&
+		(subsystem_get(to_subsys(dev)->desc->fw_name) != NULL))
+		return orig_count;
+
+	return -EINVAL;
+}
+static DEVICE_ATTR_WO(firmware_load);
+#endif
+
 int subsys_get_restart_level(struct subsys_device *dev)
 {
 	return dev->restart_level;
@@ -393,6 +414,9 @@ static struct attribute *subsys_attrs[] = {
 	&dev_attr_restart_level.attr,
 	&dev_attr_firmware_name.attr,
 	&dev_attr_system_debug.attr,
+#ifdef CONFIG_SIERRA
+	&dev_attr_firmware_load.attr,
+#endif
 	NULL,
 };
 
