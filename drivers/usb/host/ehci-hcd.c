@@ -49,6 +49,8 @@
 #include <asm/firmware.h>
 #endif
 
+#include <linux/sierra_bsudefs.h>
+
 /*-------------------------------------------------------------------------*/
 
 /*
@@ -1318,6 +1320,10 @@ static int __init ehci_hcd_init(void)
 	int retval = 0;
 
 	if (usb_disabled())
+		return -ENODEV;
+
+	/* Check if HSIC is enabled via AT command */
+	if (1 != bsgethsicflag())
 		return -ENODEV;
 
 	printk(KERN_INFO "%s: " DRIVER_DESC "\n", hcd_name);

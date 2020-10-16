@@ -17,7 +17,11 @@
 #define SIERRA_BS_UPROTO_H
 
 extern uint64_t bsgetgpioflag(void);
+#ifdef CONFIG_SIERRA
 extern bool bsgethsicflag(void);
+#else
+static inline bool bsgethsicflag(void) { return 1; } /* HSIC present */
+#endif
 extern enum bshwtype bs_hwtype_get(void);
 extern enum bs_prod_family_e bs_prod_family_get (void);
 extern bool bs_support_get (enum bsfeature feature);
