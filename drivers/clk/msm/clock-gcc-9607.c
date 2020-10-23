@@ -57,7 +57,9 @@ DEFINE_CLK_RPM_SMD(qpic_clk, qpic_a_clk, RPM_QPIC_CLK_TYPE, QPIC_ID, NULL);
 DEFINE_CLK_RPM_SMD_QDSS(qdss_clk, qdss_a_clk, RPM_MISC_CLK_TYPE, QDSS_ID);
 
 DEFINE_CLK_RPM_SMD_XO_BUFFER(bb_clk1, bb_clk1_a, BB_CLK1_ID);
-
+#ifdef CONFIG_SIERRA
+DEFINE_CLK_RPM_SMD_XO_BUFFER(rf_clk2, rf_clk2_a, RF_CLK2_ID);
+#endif /* CONFIG_SIERRA */
 DEFINE_CLK_RPM_SMD_XO_BUFFER_PINCTRL(bb_clk1_pin, bb_clk1_a_pin, BB_CLK1_ID);
 
 static DEFINE_CLK_VOTER(bimc_msmbus_clk, &bimc_clk.c, LONG_MAX);
@@ -1654,7 +1656,10 @@ static struct clk_lookup msm_clocks_lookup[] = {
 	 CLK_LOOKUP_OF("gpll2_clk_src", gpll2_clk_src, NULL),
 	 CLK_LOOKUP_OF("gpll1_clk_src", gpll1_clk_src, NULL),
 	 CLK_LOOKUP_OF("a7sspll", a7sspll, NULL),
-
+#ifdef CONFIG_SIERRA
+	 CLK_LOOKUP_OF("rf_clk2", rf_clk2, NULL),
+	 CLK_LOOKUP_OF("rf_clk2_a", rf_clk2_a, NULL),
+#endif /* CONFIG_SIERRA */
 	 CLK_LOOKUP_OF("pcnoc_clk", pcnoc_clk, NULL),
 	 CLK_LOOKUP_OF("pcnoc_a_clk", pcnoc_a_clk, NULL),
 	 CLK_LOOKUP_OF("pcnoc_msmbus_clk", pcnoc_msmbus_clk, NULL),
