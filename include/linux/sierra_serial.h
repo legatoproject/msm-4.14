@@ -20,8 +20,10 @@
 #include <linux/sierra_bsudefs.h>
 #ifdef CONFIG_SIERRA
 extern void uart_create_sysfs_config(struct device *dev);
+extern bool uart_is_function_console(struct device *dev);
 #else
 #define uart_create_sysfs_config(x)
+#define uart_is_function_console(x) (true)
 #endif
 
 #endif /* CONFIG_SIERRA_SERIAL_H */

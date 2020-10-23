@@ -1686,7 +1686,7 @@ static int __init msm_console_setup(struct console *co, char *options)
 
 	for (idx = 0; idx < UART_NR; idx++) {
 		port = msm_get_port_from_line(idx);
-		if (port->membase)
+		if (port->membase && uart_is_function_console(port->dev))
 			break;
 	}
 

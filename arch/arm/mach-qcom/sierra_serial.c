@@ -67,27 +67,9 @@ static inline enum bs_uart_func_e default_function(enum bs_uart_line_e line,
 	return default_functions[i].func;
 }
 
-static enum bs_uart_func_e assign_function(enum bs_uart_line_e line,
-					   enum bs_uart_type_e speed,
-					   enum bs_uart_func_e f)
+static enum bs_uart_func_e assign_function(struct device *dev)
 {
 	int i;
-
-	/* Check if configured function is allowed for line/speed */
-	for (i = 0; i < ARRAY_SIZE(valid_triplets) &&
-	    !TRIPLET_MATCH(&(valid_triplets[i]), line, speed, f); i++);
-
-	if  (ARRAY_SIZE(valid_triplets) > i)
-		/* Allowed, use function */
-		return valid_triplets[i].func;
-	else
-		/* Not allowed, use default function */
-		return default_function(line, speed);
-}
-
-static ssize_t uart_config_store(struct device *dev,
-				 struct device_attribute *a, char *buf)
-{
 	enum bs_uart_func_e f;
 	enum bs_uart_type_e speed;
 	int line;
@@ -106,19 +88,41 @@ static ssize_t uart_config_store(struct device *dev,
 	/* Read and check UART configuration */
 	f = bs_uart_fun_get(line);
 	if (f < BS_UART_FUNC_DISABLED || f >= BS_UART_FUNC_MAX)
-		f = BS_UART_FUNC_DISABLED;
+		return BS_UART_FUNC_DISABLED;
+
+	/* Check if configured function is allowed for line/speed */
+	for (i = 0; i < ARRAY_SIZE(valid_triplets) &&
+	    !TRIPLET_MATCH(&(valid_triplets[i]), line, speed, f); i++);
+
+	if  (ARRAY_SIZE(valid_triplets) > i)
+		/* Allowed, use function */
+		return valid_triplets[i].func;
 	else
-		f = assign_function(line, speed, f);
+		/* Not allowed, use default function */
+		return default_function(line, speed);
+}
+
+static ssize_t uart_config_show(struct device *dev,
+				struct device_attribute *a, char *buf)
+{
+	enum bs_uart_func_e f;
+
+	f = assign_function(dev);
 
 	/* Write function string to buffer */
 	strcpy(buf, bs_uart_func_name(f));
 	return strlen(buf);
 }
 
-static DEVICE_ATTR(config, S_IRUSR| S_IRGRP| S_IROTH, uart_config_store, NULL);
+static DEVICE_ATTR(config, S_IRUSR| S_IRGRP| S_IROTH, uart_config_show, NULL);
 
 void uart_create_sysfs_config(struct device *dev)
 {
 	if (0 > device_create_file(dev, &dev_attr_config))
 		dev_err(dev, "Cannot create sysfs config file\n");
+}
+
+bool uart_is_function_console(struct device *dev)
+{
+	return BS_UART_FUNC_CONSOLE == assign_function(dev);
 }
