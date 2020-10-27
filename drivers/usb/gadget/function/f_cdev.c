@@ -1596,6 +1596,17 @@ static long f_cdev_ioctl(struct file *fp, unsigned int cmd,
 			port->cbits_updated = false;
 		}
 		break;
+	case TCGETS:
+		if (clear_user((void __user *)arg, sizeof(struct termios)))
+			return -EFAULT;
+		/* fall-through */
+	case TCSETS:
+	case TCSETSW:
+	case TCSETSF:
+		/* Return success to not break userspace client logic */
+		pr_debug("Received cmd:%d is ignored\n", cmd);
+		ret = 0;
+		break;
 	default:
 		pr_err("Received cmd:%d not supported\n", cmd);
 		ret = -ENOIOCTLCMD;
@@ -2159,6 +2170,7 @@ static struct usb_function *cser_alloc(struct usb_function_instance *fi)
 	struct f_cdev *port = opts->port;
 
 	port->port_usb.func.name = "cser";
+#ifdef CONFIG_SIERRA_USB_COMP
 	if (!strcmp(opts->func_name, "dun"))
 	{
 		port->port_usb.func.name = "modem";
@@ -2167,7 +2179,11 @@ static struct usb_function *cser_alloc(struct usb_function_instance *fi)
 	{
 		port->port_usb.func.name = "nmea";
 	}
-
+	else if (!strcmp(opts->func_name, "raw"))
+	{
+		port->port_usb.func.name = "raw_data";
+	}
+#endif /* CONFIG_SIERRA_USB_COMP */
 	port->port_usb.func.strings = usb_cser_strings;
 	port->port_usb.func.bind = usb_cser_bind;
 	port->port_usb.func.unbind = usb_cser_unbind;
