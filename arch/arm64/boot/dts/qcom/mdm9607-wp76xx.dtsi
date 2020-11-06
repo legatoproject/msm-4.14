@@ -138,6 +138,10 @@
 		status = "disabled";
 	};
 
+	wcd9xxx_intc: wcd9xxx-irq {
+		status = "disabled";
+	};
+
 	sound-wm8944 {
 		compatible = "qcom,mdm9607-audio-wm8944";
 		qcom,model = "mdm9607-wm8944-i2s-snd-card";
