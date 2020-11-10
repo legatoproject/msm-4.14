@@ -2090,7 +2090,7 @@ static long mbim_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 			 * This channel number 8 should be in sync with
 			 * the one defined in u_bam.c.
 			 */
-			//info.ph_ep_info.ep_type = MBIM_DATA_EP_TYPE_BAM_DMUX;
+			info.ph_ep_info.ep_type = MBIM_DATA_EP_TYPE_BAM_DMUX;
 			info.ph_ep_info.peripheral_iface_id =
 						BAM_DMUX_CHANNEL_ID;
 			info.ipa_ep_pair.cons_pipe_num = 0;
