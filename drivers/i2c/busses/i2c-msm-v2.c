@@ -39,6 +39,24 @@
 #include <linux/msm-bus-board.h>
 #include <linux/i2c/i2c-msm-v2.h>
 
+#ifdef CONFIG_SIERRA
+/* I2C NACK is not a critical error, so dump it using dev_dbg instead of dev_err.
+ * It is the way it is managed by other platforms (NXP, Samsung, HiSilicon, Broadcom, ...).
+ * This will solve garbage display issues on serial console and dmesg log flooding
+ * when using i2cdetect tool or when talking to slave devices that wake up on I2C
+ * activity (NACKing the first I2C message).
+ */
+#define dev_log_i2c(dev, xfer, fmt, ...) { \
+	if (xfer->err == I2C_MSM_ERR_NACK) \
+		dev_dbg(dev, fmt, ##__VA_ARGS__); \
+	else \
+		dev_err(dev, fmt, ##__VA_ARGS__); \
+	}
+#else
+/* Leave the original kernel implementation as what it used to be */
+#define dev_log_i2c(dev, xfer, fmt, ...) dev_err(dev, fmt, ##__VA_ARGS__);
+#endif
+
 #ifdef DEBUG
 static const enum msm_i2_debug_level DEFAULT_DBG_LVL = MSM_DBG;
 #else
@@ -114,7 +132,7 @@ static void i2c_msm_dbg_dump_diag(struct i2c_msm_ctrl *ctrl,
 	}
 
 	/* dump xfer details */
-	dev_err(ctrl->dev,
+	dev_log_i2c(ctrl->dev, xfer,
 		"%s: msgs(n:%d cur:%d %s) bc(rx:%zu tx:%zu) mode:%s slv_addr:0x%0x MSTR_STS:0x%08x OPER:0x%08x\n",
 		str, xfer->msg_cnt, xfer->cur_buf.msg_idx,
 		xfer->cur_buf.is_rx ? "rx" : "tx", xfer->rx_cnt, xfer->tx_cnt,
