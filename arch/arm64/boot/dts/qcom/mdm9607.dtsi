@@ -1481,6 +1481,12 @@
 			qcom,smdpkt-dev-name = "at_mdm0";
 		};
 
+		qcom,smdpkt-gpsnmea {
+			qcom,smdpkt-edge = "modem";
+			qcom,smdpkt-ch-name = "GPSNMEA";
+			qcom,smdpkt-dev-name = "at_mdm1";
+		};
+
 		qcom,smdpkt-apr-apps2 {
 			qcom,smdpkt-edge = "modem";
 			qcom,smdpkt-ch-name = "apr_apps2";
