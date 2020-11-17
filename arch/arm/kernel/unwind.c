@@ -49,6 +49,8 @@
 #include <asm/traps.h>
 #include <asm/unwind.h>
 
+#include <mach/sierra_smem.h>
+
 /* Dummy functions to avoid linker complaints */
 void __aeabi_unwind_cpp_pr0(void)
 {
@@ -498,6 +500,9 @@ void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		frame.lr = 0;
 		frame.pc = thread_saved_pc(tsk);
 	}
+
+	/* log error stack frame and task ID */
+	sierra_smem_errdump_save_frame(tsk, &frame);
 
 	while (1) {
 		int urc;

@@ -645,11 +645,17 @@ struct __attribute__((packed)) cross_sku_smem_s
   uint32_t crc32;                                /* CRC32 of above fields */
 };
 
+#ifdef CONFIG_SIERRA
 void sierra_smem_errdump_save_start(void);
-void sierra_smem_errdump_save_timestamp(uint32_t time_stamp);
 void sierra_smem_errdump_save_errstr(char *errstrp);
-void sierra_smem_errdump_save_auxstr(char *errstrp);
 void sierra_smem_errdump_save_frame(void *taskp, void *framep);
+#else
+static inline void sierra_smem_errdump_save_start(void) { return; }
+static inline void sierra_smem_errdump_save_errstr(char *errstrp) { return; }
+static inline void sierra_smem_errdump_save_frame(void *taskp, void *framep) { return; }
+#endif
+void sierra_smem_errdump_save_timestamp(uint32_t time_stamp);
+void sierra_smem_errdump_save_auxstr(char *errstrp);
 int  sierra_smem_get_download_mode(void);
 int sierra_smem_boothold_mode_set(void);
 int sierra_smem_warm_reset_cmd_get(void);
