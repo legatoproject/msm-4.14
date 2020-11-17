@@ -37,6 +37,10 @@
 #include <soc/qcom/watchdog.h>
 #include <soc/qcom/minidump.h>
 
+#ifdef CONFIG_SIERRA
+#include <mach/sierra_smem.h>
+#endif /* SIERRA */
+
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
 #define EMERGENCY_DLOAD_MAGIC3    0x77777777
@@ -195,10 +199,12 @@ static int dload_set(const char *val, const struct kernel_param *kp)
 
 	int old_val = download_mode;
 
+#ifndef CONFIG_SIERRA
 	if (!download_mode) {
 		pr_err("Error: SDI dynamic enablement is not supported\n");
 		return -EINVAL;
 	}
+#endif /* SIERRA */
 
 	ret = param_set_int(val, kp);
 
@@ -213,8 +219,10 @@ static int dload_set(const char *val, const struct kernel_param *kp)
 
 	set_dload_mode(download_mode);
 
+#ifndef CONFIG_SIERRA
 	if (!download_mode)
 		scm_disable_sdi();
+#endif /* SIERRA */
 
 	return 0;
 }
@@ -695,6 +703,11 @@ skip_sysfs_create:
 
 	if (scm_is_call_available(SCM_SVC_PWR, SCM_IO_DEASSERT_PS_HOLD) > 0)
 		scm_deassert_ps_hold_supported = true;
+
+#ifdef CONFIG_SIERRA
+	download_mode = sierra_smem_get_download_mode();
+#endif /* CONFIG_SIERRA */
+
 	if (!is_kdump_kernel())
 		set_dload_mode(download_mode);
 	if (!download_mode)
