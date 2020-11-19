@@ -121,6 +121,10 @@
 		};
 	};
 
+	qcom,msm-thermal {
+		qcom,limit-temp = <80>;
+	};
+
 	sdcard_ext_vreg: sdcard_ext_vreg {
 	/* undefine (by overriding) the use of pm-gpio4 *
 	 * we don't use pm-gpio4 for sdcard_ext_vreg.   *
