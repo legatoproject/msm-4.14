@@ -1802,7 +1802,10 @@ static int msm_serial_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "msm_serial: detected port #%d\n", line);
 
-	uart_create_sysfs_config(&pdev->dev);
+	if (uart_create_sysfs_config(&pdev->dev) != 0)
+	{
+		return -ENODEV;
+	}
 
 	port = msm_get_port_from_line(line);
 	port->dev = &pdev->dev;

@@ -3376,7 +3376,10 @@ static int msm_hs_probe(struct platform_device *pdev)
 	if (pdev->dev.of_node)
 		msm_uport->uart_type = BLSP_HSUART;
 
-	uart_create_sysfs_config(&pdev->dev);
+	if (uart_create_sysfs_config(&pdev->dev) != 0)
+	{
+		return -ENODEV;
+	}
 
 	msm_hs_get_pinctrl_configs(uport);
 	/* Get required resources for BAM HSUART */

@@ -188,7 +188,7 @@ enum bs_uart_line_e
 
 /************
  *
- * Members:  BS_UART_TYPE_HSL - high speed lite UART
+ * Members:  BS_UART_TYPE_LS - low speed UART
  *           BS_UART_TYPE_HS - high speed UART
  *           BS_UART_TYPE_MAX - used for bounds checking
  * Notes:    None
@@ -196,7 +196,7 @@ enum bs_uart_line_e
  ************/
 enum bs_uart_type_e
 {
-  BS_UART_TYPE_HSL = 0,
+  BS_UART_TYPE_LS = 0,
   BS_UART_TYPE_HS,
   BS_UART_TYPE_MAX,
 };
