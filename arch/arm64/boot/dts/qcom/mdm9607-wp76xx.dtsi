@@ -222,6 +222,10 @@
 		alias-WLAN_EN = <&tlmm_pinmux 58 0>;
 		alias-WIFI_IRQ = <&tlmm_pinmux 79 0>;
 	};
+
+	msm_cdc_pinctrl@26 {
+		status = "disabled";
+	};
 };
 
 &blsp1_uart1_ls {
