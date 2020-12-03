@@ -119,6 +119,67 @@
 				bias-disable;
 			};
 		};
+
+		spi1 {
+
+			spi1_default: spi1_default {
+				/* active state */
+				mux {
+					/* MOSI, MISO, CLK */
+					pins = "gpio0", "gpio1", "gpio3";
+					function = "blsp_spi3";
+				};
+
+				config {
+					pins = "gpio0", "gpio1", "gpio3";
+					drive-strength = <12>;
+					bias-disable;
+				};
+			};
+
+			spi1_sleep: spi1_sleep {
+				/* suspended state */
+				mux {
+					/* MOSI, MISO, CLK */
+					pins = "gpio0", "gpio1", "gpio3";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio0", "gpio1", "gpio3";
+					drive-strength = <2>;
+					bias-pull-down;
+				};
+			};
+
+			spi1_cs0_active: cs0_active {
+				/* CS */
+				mux {
+					pins = "gpio2";
+					function = "blsp_spi3";
+				};
+
+				config {
+					pins = "gpio2";
+					drive-strength = <2>;
+					bias-disable;
+				};
+			};
+
+			spi1_cs0_sleep: cs0_sleep {
+				/* CS */
+				mux {
+					pins = "gpio2";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio2";
+					drive-strength = <2>;
+					bias-disable;
+				};
+			};
+		};
 	};
 
 	qcom,msm-thermal {
@@ -235,6 +296,10 @@
 };
 
 &blsp1_uart2_hs {
+	status = "ok";
+};
+
+&spi_1 {
 	status = "ok";
 };
 

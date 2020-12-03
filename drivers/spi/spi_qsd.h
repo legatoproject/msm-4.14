@@ -376,6 +376,9 @@ struct msm_spi {
 	struct pinctrl_state	*pins_sleep;
 	bool			is_init_complete;
 	bool			pack_words;
+#ifdef CONFIG_SIERRA
+	u32			deassert_wait;
+#endif
 };
 
 /* Forward declaration */

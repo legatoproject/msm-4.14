@@ -89,6 +89,9 @@ static inline void msm_spi_register_init(struct msm_spi *dd)
 	writel_relaxed(0x00000000, dd->base + SPI_OPERATIONAL);
 	writel_relaxed(0x00000000, dd->base + SPI_CONFIG);
 	writel_relaxed(0x00000000, dd->base + SPI_IO_MODES);
+#ifdef CONFIG_SIERRA
+	writel_relaxed(dd->deassert_wait, dd->base + SPI_DEASSERT_WAIT);
+#endif
 	if (dd->qup_ver)
 		writel_relaxed(0x00000000, dd->base + QUP_OPERATIONAL_MASK);
 }
@@ -2233,6 +2236,10 @@ static struct msm_spi_platform_data *msm_spi_dt_to_pdata(
 			&pdata->rt_priority,		 DT_OPT,  DT_BOOL,  0},
 		{"qcom,shared",
 			&pdata->is_shared,		 DT_OPT,  DT_BOOL,  0},
+#ifdef CONFIG_SIERRA
+		{"sierra,deassert-time",
+			&dd->deassert_wait, DT_OPT,  DT_U32,   0},
+#endif
 		{NULL,  NULL,                            0,       0,        0},
 		};
 
