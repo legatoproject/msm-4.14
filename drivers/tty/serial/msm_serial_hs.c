@@ -407,6 +407,7 @@ static void msm_hs_resource_unvote(struct msm_hs_port *msm_uport)
 }
 
  /* Vote for resources before accessing them */
+#ifndef CONFIG_SIERRA
 static void msm_hs_resource_vote(struct msm_hs_port *msm_uport)
 {
 	int ret;
@@ -421,6 +422,28 @@ static void msm_hs_resource_vote(struct msm_hs_port *msm_uport)
 	}
 	atomic_inc(&msm_uport->resource_count);
 }
+#else
+static void msm_hs_resource_vote(struct msm_hs_port *msm_uport)
+{
+	/* Qualcomm ticket: 04967360: Avoid multiple runtime suspend and runtime resume calls. */
+	int ret, rc;
+	struct uart_port *uport = &(msm_uport->uport);
+
+	rc = atomic_fetch_inc(&msm_uport->resource_count);
+	if(rc <= 0){
+		ret = pm_runtime_get_sync(uport->dev);
+		if (ret < 0 || msm_uport->pm_state != MSM_HS_PM_ACTIVE) {
+			MSM_HS_WARN("%s():%s runtime PM CB not invoked ret:%d st:%d\n",
+				__func__, dev_name(uport->dev), ret,
+						msm_uport->pm_state);
+			msm_hs_pm_resume(uport->dev);
+		}
+	} else {
+		MSM_HS_WARN("%s(): Run pm_runtime_get_noresume(), resource_count=%d", __func__, rc);
+		pm_runtime_get_noresume(uport->dev);
+	}
+}
+#endif
 
 /* Check if the uport line number matches with user id stored in pdata.
  * User id information is stored during initialization. This function
@@ -1682,6 +1705,15 @@ static void msm_serial_hs_rx_work(struct kthread_work *work)
 
 	spin_lock_irqsave(&uport->lock, flags);
 
+#ifdef CONFIG_SIERRA
+	/*
+	 * An Rx with the IRQ disabled, will cause a stray interrrupt to be
+	 * raised when the IRQ is next enabled; Set the ignore flag, to let
+	 * the ISR skip the processing of the interrupt.
+	 */
+        msm_uport->wakeup.ignore = 1;
+#endif
+
 	if (!tty || rx->flush == FLUSH_SHUTDOWN) {
 		MSM_HS_ERR("%s():Invalid driver state flush %d\n",
 				__func__, rx->flush);
@@ -2238,7 +2270,9 @@ void enable_wakeup_interrupt(struct msm_hs_port *msm_uport)
 
 	if (!(msm_uport->wakeup.enabled)) {
 		spin_lock_irqsave(&uport->lock, flags);
+#ifndef CONFIG_SIERRA
 		msm_uport->wakeup.ignore = 1;
+#endif
 		msm_uport->wakeup.enabled = true;
 		spin_unlock_irqrestore(&uport->lock, flags);
 		disable_irq(uport->irq);
@@ -2413,6 +2447,12 @@ static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
 		 * Port was clocked off during rx, wake up and
 		 * optionally inject char into tty rx
 		 */
+#ifdef CONFIG_SIERRA
+		spin_unlock_irqrestore(&uport->lock, flags);
+		msm_hs_resource_vote(msm_uport);
+		msm_hs_resource_unvote(msm_uport);
+		spin_lock_irqsave(&uport->lock, flags);
+#endif
 		if (msm_uport->wakeup.inject_rx) {
 			tty = uport->state->port.tty;
 			tty_insert_flip_char(tty->port,
@@ -3297,7 +3337,11 @@ static void  msm_serial_hs_rt_init(struct uart_port *uport)
 
 	MSM_HS_DBG("%s(): Enabling runtime pm\n", __func__);
 	pm_runtime_set_suspended(uport->dev);
+#ifndef CONFIG_SIERRA
 	pm_runtime_set_autosuspend_delay(uport->dev, 100);
+#else
+	pm_runtime_set_autosuspend_delay(uport->dev, 5000);
+#endif /* CONFIG_SIERRA */
 	pm_runtime_use_autosuspend(uport->dev);
 	mutex_lock(&msm_uport->mtx);
 	msm_uport->pm_state = MSM_HS_PM_SUSPENDED;
@@ -3468,7 +3512,11 @@ static int msm_hs_probe(struct platform_device *pdev)
 	}
 
 	msm_uport->wakeup.irq = pdata->wakeup_irq;
+#ifndef CONFIG_SIERRA
 	msm_uport->wakeup.ignore = 1;
+#else
+	msm_uport->wakeup.ignore = 0;
+#endif
 	msm_uport->wakeup.inject_rx = pdata->inject_rx_on_wakeup;
 	msm_uport->wakeup.rx_to_inject = pdata->rx_to_inject;
 	msm_uport->obs = pdata->obs;
@@ -3669,7 +3717,11 @@ static void msm_hs_shutdown(struct uart_port *uport)
 
 	spin_lock_irqsave(&uport->lock, flags);
 	msm_uport->wakeup.enabled = false;
+#ifndef CONFIG_SIERRA
 	msm_uport->wakeup.ignore = 1;
+#else
+	msm_uport->wakeup.ignore = 0;
+#endif
 	spin_unlock_irqrestore(&uport->lock, flags);
 
 	/* Free the interrupt */
