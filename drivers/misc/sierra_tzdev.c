@@ -90,6 +90,8 @@ struct scm_cmd_buf_s
 #define SCM_SYM_ID_CMD         0x3
 
 static int sierra_tzdev_open_times = 0; /* record device open times, for shared resources using */
+static bool tz4_enabled = false; /* system running TrustZone 4 */
+module_param(tz4_enabled, bool, S_IRUGO);
 
 static struct crypto_clock {
   char *name;
@@ -885,6 +887,7 @@ static struct miscdevice sierra_tzdev_misc = {
 static int __init sierra_tzdev_init(void)
 {
   tzdev_clock_init();
+  tz4_enabled = is_scm_armv8();
   return misc_register(&sierra_tzdev_misc);
 }
 
