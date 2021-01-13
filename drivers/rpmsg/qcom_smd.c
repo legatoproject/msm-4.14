@@ -1106,7 +1106,7 @@ static int qcom_smd_set_sigs(struct rpmsg_endpoint *ept, u32 sigs)
 	if (sigs & TIOCM_RTS)
 		SET_TX_CHANNEL_FLAG(channel, fCTS, 1);
 	else
-		SET_TX_CHANNEL_FLAG(channel, fDSR, 0);
+		SET_TX_CHANNEL_FLAG(channel, fCTS, 0);
 
 	SET_TX_CHANNEL_FLAG(channel, fSTATE, 1);
 	qcom_smd_signal_channel(channel);
