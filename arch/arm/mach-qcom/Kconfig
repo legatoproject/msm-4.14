@@ -281,6 +281,12 @@ config SIERRA_SSMEM
           selected, some of the Sierra Wireless system features may not work.
 
           If unsure, select 'y'.
+
+config SIERRA_FX30
+        bool "Enable Sierra Wireless FX30 features (Very Experimental)"
+        default n
+        help
+          Support for FX30 features.
 #SWISTOP
 
 endif

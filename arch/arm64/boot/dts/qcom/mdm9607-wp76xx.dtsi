@@ -441,3 +441,8 @@
 		wlf,gpio_defaults = <0x0003 0xC000>;
 	};
 };
+
+/* Override data in mdm9607-wp76xx.dtsi (must come last). */
+#ifdef CONFIG_SIERRA_FX30
+#include "mdm9607-fx30.dtsi"
+#endif

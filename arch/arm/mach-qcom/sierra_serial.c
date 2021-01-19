@@ -16,6 +16,47 @@
 #include <linux/of.h>
 #include <linux/sierra_serial.h>
 
+/*
+RS485 loopback mode is not currently supported.
+For RS485_LOOPBACK mode, I still need to understand the "echo"/"special char"
+related behaviour in "tty_bufhead.work" in kernel worker thread.
+More investigation is required on TTY configuration regarding echo/special chars
+xmit on the receiving path.
+*/
+/* #define RS485_ENABLE_LOOPBACK_SUPPORT */
+#undef RS485_ENABLE_LOOPBACK_SUPPORT
+
+
+#ifdef CONFIG_SIERRA_MSM_RS485
+#include <linux/gpio/driver.h>
+#include "mach/swimcu.h"
+
+enum serial_rs_mode {
+	SERIAL_RS232, /* Default serial communication mode*/
+	SERIAL_RS485_NO_LOOPBACK, /* RS485 support*/
+	SERIAL_RS485_LOOPBACK, /* RS485 support*/
+};
+
+enum rs485_term_mode {
+  RS485_TERM_DISABLE = 0, /* Disable termination resistor - Default */
+  RS485_TERM_ENABLE,      /* Enable termination resistor */
+  RS485_TERM_DYNAMIC,     /* Dynamic termination resistor - Currently not supported */
+  RS485_TERM_NUM          /* ALWAYS LAST - Number of items in this enumeration */
+};
+
+/* DM, FIXME: Some of this need to be reworked to fit into new GPIO framework. */
+#define MSM_GPIO_RS485_OUT_EN_N       (47)
+#define MSM_GPIO_RS485_IN_EN          (48)
+#define MSM_GPIOEXP_FORCEOFF_RS232_N  FX30SEXP_GPIO_TO_SYS(16)
+#define MSM_GPIOEXP_RS485_TERM_N      FX30SEXP_GPIO_TO_SYS(20)
+
+static unsigned int gpioexp_forceoff_rs232  = ARCH_NR_GPIOS;
+static unsigned int gpioexp_rs483_term      = ARCH_NR_GPIOS;
+static unsigned int gpio_rs485_out_en       = ARCH_NR_GPIOS;
+static unsigned int gpio_rs485_in_en        = ARCH_NR_GPIOS;
+
+#endif
+
 typedef struct uart_function_triplet_ {
 	enum bs_uart_line_e line;
 	enum bs_uart_type_e speed;
@@ -29,10 +70,18 @@ uart_function_triplet_t valid_triplets[] = {
 	/* valid functions for UART1, high-speed */
 	{BS_UART1_LINE, BS_UART_TYPE_HS, BS_UART_FUNC_AT},
 	{BS_UART1_LINE, BS_UART_TYPE_HS, BS_UART_FUNC_NMEA},
+#ifdef CONFIG_SIERRA_FX30
+	{BS_UART1_LINE, BS_UART_TYPE_HS, BS_UART_FUNC_RS232_FC},
+#else
 	{BS_UART1_LINE, BS_UART_TYPE_HS, BS_UART_FUNC_APP},
+#endif
 	/* valid functions for UART1, low-speed */
 	{BS_UART1_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_DM},
 	{BS_UART1_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_CONSOLE},
+#ifdef CONFIG_SIERRA_FX30
+	{BS_UART1_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_APP},
+	{BS_UART1_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_RS485},
+#endif
 	/* valid functions for UART2, high-speed */
 	{BS_UART2_LINE, BS_UART_TYPE_HS, BS_UART_FUNC_AT},
 	{BS_UART2_LINE, BS_UART_TYPE_HS, BS_UART_FUNC_NMEA},
@@ -40,6 +89,10 @@ uart_function_triplet_t valid_triplets[] = {
 	/* valid functions for UART2, low-speed */
 	{BS_UART2_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_DM},
 	{BS_UART2_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_CONSOLE},
+#ifdef CONFIG_SIERRA_FX30
+	{BS_UART2_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_RS485},
+	{BS_UART2_LINE, BS_UART_TYPE_LS, BS_UART_FUNC_RS232_FC},
+#endif
 };
 #define TRIPLET_MATCH(triplet, l, s, f) \
 	((triplet)->line == l && \

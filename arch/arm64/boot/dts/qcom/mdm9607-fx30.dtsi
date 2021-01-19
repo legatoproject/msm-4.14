@@ -1,0 +1,183 @@
+/*
+ * mdm9607-fx30.dtsi
+ *
+ *  Additional dts configuration for the FX30
+ *
+ * Copyright (c) 2016 - 2019 Sierra Wireless, Inc.
+ *
+ *  This program is free software; you can redistribute  it and/or modify it
+ *  under  the terms of  the GNU General  Public License as published by the
+ *  Free Software Foundation;  either version 2 of the  License, or (at your
+ *  option) any later version.
+ *
+ */
+
+/* I2C1_DAT, I2C1_CLK . */
+&i2c_4 {
+	/* For both FX30 and FX30S. IOT_ADC signal on CN600.P20->U401.ADC0 .
+	   This is for external ADC ADS1015. By default I2C address of ADS1015
+	   is 0x48.
+	   This should not be in device tree, because this device may not be on
+	   the board (at the present time, it is coming via IoT slot).
+	*/
+	iot_adc@48 {
+		compatible = "ads1015";
+		reg = <0x48>;
+	};
+
+	/* For FX30 only. TCA6416 I2C chip address = 0x20. */
+	tca6416: gpio@20 {
+		compatible = "ti,tca6416";
+		reg = <0x20>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+
+	/* FX30S only. TCA6424 I2C chip address = 0x22. */
+	tca6424: gpio@22 {
+		compatible = "ti,tca6424";
+		reg = <0x22>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+};
+
+&sierra_gpio {
+
+	/* Note for GPIO36 and GPIO38:
+	   SWIMCU pinctrl is not defined inside the device tree,
+           and we have to know SWIMCU gpio base address: 200
+	   (see SWIMCU_GPIO_BASE in arch/arm/mach-msm/include/mach/swimcu.h)
+	*/
+
+	/*
+	 * FX30 GPIOs
+	 */
+
+	/* GPIO2 */
+	alias-FX30-DIGITAL_INPUT1_N = <&tlmm_pinmux 38 0>;
+	/* GPIO7 */
+	alias-FX30-PB_INPUT = <&tlmm_pinmux 16 0>;
+	/* GPIO21 */
+	alias-FX30-DIGITAL_INPUT2_N = <&tlmm_pinmux 8 0>;
+	/* GPIO22 */
+	alias-FX30-DIGITAL_INPUT3_N = <&tlmm_pinmux 9 0>;
+	/* GPIO24 */
+	alias-FX30-ON_OFF_MON_N = <&tlmm_pinmux 11 0>;
+	/* GPIO25 */
+	alias-FX30-IOT_DETECT = <&tlmm_pinmux 51 0>;
+	/* GPIO29 */
+	alias-FX30-GPIO29 = <&tlmm_pinmux 46 0>;
+	/* GPIO32 */
+	alias-FX30-HUB_ENABLE = <&tlmm_pinmux 77 0>;
+	/* GPIO36 */
+	alias-FX30-ULPM_WAKE1_36 = <200 0>;
+	/* GPIO38 */
+	alias-FX30-ULPM_WAKE1_38 = <202 0>;
+	/* GPIO43 */
+	alias-FX30-NETWORK_LED_RED = <&tca6416 0 0>;
+	/* GPIO44 */
+	alias-FX30-NETWORK_LED_GRN = <&tca6416 1 0>;
+	/* GPIO45 */
+	alias-FX30-SIGNAL_LED_RED = <&tca6416 2 0>;
+	/* GPIO46 */
+	alias-FX30-SIGNAL_LED_GRN = <&tca6416 3 0>;
+	/* GPIO47 */
+	alias-FX30-USER_LED_RED = <&tca6416 4 0>;
+	/* GPIO48 */
+	alias-FX30-USER_LED_GRN = <&tca6416 5 0>;
+	/* GPIO49 */
+	alias-FX30-POWER_LED_RED_N = <&tca6416 6 0>;
+	/* GPIO50 */
+	alias-FX30-POWER_LED_GRN = <&tca6416 7 0>;
+	/* GPIO51 */
+	alias-FX30-POWER_LED_MUX = <&tca6416 8 0>;
+	/* GPIO52 */
+	alias-FX30-GPS_BIAS_EN = <&tca6416 9 0>;
+	/* GPIO53 */
+	alias-FX30-IO_PULLUP_EN2 = <&tca6416 10 0>;
+	/* GPIO54 */
+	alias-FX30-IO_PULLUP_EN3 = <&tca6416 11 0>;
+	/* GPIO55 */
+	alias-FX30-ETH_DISABLE_N = <&tca6416 12 0>;
+	/* GPIO56 */
+	alias-FX30-DIGITAL_OUTPUT3 = <&tca6416 13 0>;
+	/* GPIO57 */
+	alias-FX30-IO_PULLUP_EN1 = <&tca6416 14 0>;
+	/* GPIO58 */
+	alias-FX30-POWER_HOLD = <&tca6416 15 0>;
+
+	/*
+	 * FX30S GPIOs
+	 */
+
+	/* GPIO2 */
+	alias-FX30S-DIGITAL_INPUT1_N = <&tlmm_pinmux 38 0>;
+	/* GPIO7 */
+	alias-FX30S-PB_INPUT = <&tlmm_pinmux 16 0>;
+	/* GPIO21 */
+	alias-FX30S-DIGITAL_INPUT2_N = <&tlmm_pinmux 8 0>;
+	/* GPIO22 */
+	alias-FX30S-DIGITAL_INPUT3_N = <&tlmm_pinmux 9 0>;
+	/* GPIO24 */
+	alias-FX30S-ON_OFF_MON_N = <&tlmm_pinmux 11 0>;
+	/* GPIO25 */
+	alias-FX30S-IOT_DETECT = <&tlmm_pinmux 51 0>;
+	/* GPIO29 */
+	alias-FX30S-GPIO29 = <&tlmm_pinmux 46 0>;
+	/* GPIO32 */
+	alias-FX30S-HUB_ENABLE = <&tlmm_pinmux 77 0>;
+	/* GPIO36 */
+	alias-FX30S-ULPM_WAKE1_36 = <200 0>;
+	/* GPIO38 */
+	alias-FX30S-ULPM_WAKE1_38 = <202 0>;
+	/* GPIO43 */
+	alias-FX30S-NETWORK_LED_RED = <&tca6424 0 0>;
+	/* GPIO44 */
+	alias-FX30S-NETWORK_LED_GRN = <&tca6424 1 0>;
+	/* GPIO45 */
+	alias-FX30S-SIGNAL_LED_RED = <&tca6424 2 0>;
+	/* GPIO46 */
+	alias-FX30S-SIGNAL_LED_GRN = <&tca6424 3 0>;
+	/* GPIO47 */
+	alias-FX30S-USER_LED_RED = <&tca6424 4 0>;
+	/* GPIO48 */
+	alias-FX30S-USER_LED_GRN = <&tca6424 5 0>;
+	/* GPIO49 */
+	alias-FX30S-POWER_LED_RED_N = <&tca6424 6 0>;
+	/* GPIO50 */
+	alias-FX30S-POWER_LED_GRN = <&tca6424 7 0>;
+	/* GPIO51 */
+	alias-FX30S-POWER_LED_MUX = <&tca6424 8 0>;
+	/* GPIO52 */
+	alias-FX30S-GPS_BIAS_EN = <&tca6424 9 0>;
+	/* GPIO53 */
+	alias-FX30S-IO_PULLUP_EN2 = <&tca6424 10 0>;
+	/* GPIO54 */
+	alias-FX30S-IO_PULLUP_EN3 = <&tca6424 11 0>;
+	/* GPIO55 */
+	alias-FX30S-GPIO55 = <&tca6424 12 0>;
+	/* GPIO56 */
+	alias-FX30S-DIGITAL_OUTPUT3 = <&tca6424 13 0>;
+	/* GPIO57 */
+	alias-FX30S-IO_PULLUP_EN1 = <&tca6424 14 0>;
+	/* GPIO58 */
+	alias-FX30S-POWER_HOLD = <&tca6424 15 0>;
+	/* GPIO59: Handeled in RS485 driver */
+	/* alias-FX30S-FORCEOFF_RS232_N = <&tca6424 16 0>; */
+	/* GPIO60 */
+	alias-FX30S-RS485_OUT_EN = <&tca6424 17 0>;
+	/* GPIO61 */
+	alias-FX30S-RS485_IN_EN_N = <&tca6424 18 0>;
+	/* GPIO62 */
+	alias-FX30S-RS485_POL_N = <&tca6424 19 0>;
+	/* GPIO63: Handeled in RS485 driver */
+	/* alias-FX30S-RS485_TERM_N = <&tca6424 20 0>; */
+	/* GPIO64 */
+	alias-FX30S-GPIO64 = <&tca6424 21 0>;
+	/* GPIO65 */
+	alias-FX30S-GPIO65 = <&tca6424 22 0>;
+	/* GPIO66 */
+	alias-FX30S-GPIO66 = <&tca6424 23 0>;
+};
+

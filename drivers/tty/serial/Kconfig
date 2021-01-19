@@ -1099,6 +1099,13 @@ config SERIAL_MSM_CONSOLE
 	select SERIAL_CORE_CONSOLE
 	select SERIAL_EARLYCON
 
+config SIERRA_MSM_RS485
+	bool "Support RS485 mode in MSM UART Legacy mode Serial Driver (Very Experimental)"
+	depends on ARM && ARCH_MSM && SERIAL_MSM && SIERRA_FX30
+	default n
+	help
+	  Select this module to enable runtime switch between RS232 and RS485.
+
 config SERIAL_RX_CONSOLE_ONLY
 	bool "MSM serial rx only console support"
 	depends on SERIAL_MSM=y
