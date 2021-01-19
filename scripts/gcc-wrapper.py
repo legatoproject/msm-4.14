@@ -83,7 +83,7 @@ def run_gcc():
     compiler = sys.argv[0]
 
     try:
-        proc = subprocess.Popen(args, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(args, stderr=subprocess.PIPE, universal_newlines=True)
         for line in proc.stderr:
             print(line, end=' ')
             interpret_warning(line)
