@@ -130,6 +130,20 @@
 					<86 512 500 800>;
 		status = "disabled";
 	};
+
+	qcom,msm-dai-mi2s {
+		mi2s_prim: qcom,msm-dai-q6-mi2s-prim {
+			pinctrl-names = "default", "idle";
+			pinctrl-0 = <&pri_mi2s_ws_active
+					&pri_mi2s_sck_active
+					&pri_mi2s_dout_active
+					&pri_mi2s_din_active>;
+			pinctrl-1 = <&pri_mi2s_ws_sleep
+					&pri_mi2s_sck_sleep
+					&pri_mi2s_dout_sleep
+					&pri_mi2s_din_sleep>;
+		};
+	};
 };
 
 &spi_1 { /* BLSP1 QUP2 */
