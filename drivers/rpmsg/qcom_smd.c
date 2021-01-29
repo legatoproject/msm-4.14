@@ -1519,6 +1519,12 @@ static int qcom_smd_parse_edge(struct device *dev,
 		return ret;
 	}
 
+#ifdef CONFIG_SIERRA
+	ret = enable_irq_wake(irq);
+	if (ret < 0)
+		dev_err(dev, "enable_irq_wake() failed on %d\n", irq);
+#endif
+
 	edge->irq = irq;
 
 	return 0;
