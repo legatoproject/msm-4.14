@@ -49,7 +49,11 @@ struct gpiochip_list {
 #define DT_COMPATIBLE		"sierra,gpio"
 #define GPIO_ALIAS_PROPERTY	"alias-"
 
+#ifdef CONFIG_SIERRA_FX30
+#define MAX_NB_GPIOS	200
+#else
 #define MAX_NB_GPIOS	100
+#endif
 
 struct gpio_alias_map {
 	struct device_attribute	attr;		// attribute for the alias populated to /sys/class/gpio/aliases/
