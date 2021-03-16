@@ -601,7 +601,7 @@ static ssize_t unexport_store(struct class *class,
 #ifdef CONFIG_SIERRA
 	const char		*ioname;
 	char			ioname_buf[128];
-	int			index = 0;
+	void			*match = NULL;
 #endif
 
 #ifdef CONFIG_SIERRA
@@ -633,7 +633,7 @@ static ssize_t unexport_store(struct class *class,
 #ifdef CONFIG_SIERRA
 	gpio_remove_alias_link(desc);
 
-	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &match))) {
 		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
 		sysfs_remove_link(&gpio_class.p->subsys.kobj, ioname_buf);
 	}
@@ -688,7 +688,7 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 	int			offset;
 #ifdef CONFIG_SIERRA
 	char			ioname_buf[128];
-	int			index = 0;
+	void			*match = NULL;
 #endif
 
 	/* can't export until sysfs is available ... */
@@ -744,7 +744,7 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 		ioname = chip->names[offset];
 
 #ifdef CONFIG_SIERRA
-	ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index);
+	ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &match);
 	if (ioname)
 		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
 	else
@@ -764,7 +764,7 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 #ifdef CONFIG_SIERRA
 	gpio_create_alias_link(desc, dev);
 
-	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &match))) {
 		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
 		status = sysfs_create_link(&gpio_class.p->subsys.kobj, &dev->kobj, ioname_buf);
 	}

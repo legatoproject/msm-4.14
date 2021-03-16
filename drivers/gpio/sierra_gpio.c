@@ -49,21 +49,19 @@ struct gpiochip_list {
 #define DT_COMPATIBLE		"sierra,gpio"
 #define GPIO_ALIAS_PROPERTY	"alias-"
 
-#ifdef CONFIG_SIERRA_FX30
-#define MAX_NB_GPIOS	200
-#else
-#define MAX_NB_GPIOS	100
-#endif
-
 struct gpio_alias_map {
 	struct device_attribute	attr;		// attribute for the alias populated to /sys/class/gpio/aliases/
 	char			*gpio_name;	// alias name
 	int			gpio_num;	// gpio number
 };
 
-static u32			gpio_alias_count = 0;
+static LIST_HEAD(gpio_alias_list);
+struct gpio_alias_list {
+	struct list_head	list;
+	struct gpio_alias_map	gpio_alias_map;
+};
+
 static u32			gpio_alias_dt_count = 0;
-static struct gpio_alias_map	gpio_alias_map[MAX_NB_GPIOS];
 
 /* for RI PIN owner flag*/
 #define RI_OWNER_MODEM      0
@@ -164,19 +162,20 @@ static s16 gpio_sync_ownership(struct gpio_desc *desc)
  */
 int gpio_map_name_to_num(const char *buf, int len, bool force, long *gpio_num)
 {
-	int	i;
 	int	cmplen = len;
+	struct gpio_alias_list	*thisalias = NULL;
 
 	if ((len > 0) && ((isspace(buf[len - 1]) || !buf[len - 1])))
 		cmplen--; /* strip trailing <0x0a> from buf for compare ops */
 
 	gpio_sync_ri();
-	for (i = 0; i < gpio_alias_count; i++) {
+
+	list_for_each_entry(thisalias, &gpio_alias_list, list) {
 		struct gpio_desc	*desc;
-		if (gpio_alias_map[i].gpio_name &&
-			(strlen(gpio_alias_map[i].gpio_name) == cmplen) &&
-			(strncmp(buf, gpio_alias_map[i].gpio_name, cmplen) == 0)) {
-			desc = gpio_to_valid_desc(gpio_alias_map[i].gpio_num);
+		if (thisalias->gpio_alias_map.gpio_name &&
+			(strlen(thisalias->gpio_alias_map.gpio_name) == cmplen) &&
+			(strncmp(buf, thisalias->gpio_alias_map.gpio_name, cmplen) == 0)) {
+			desc = gpio_to_valid_desc(thisalias->gpio_alias_map.gpio_num);
 			/* The multi-function GPIO is used as another feature, cannot export */
 			if (!desc)
 				return -EINVAL;
@@ -185,7 +184,7 @@ int gpio_map_name_to_num(const char *buf, int len, bool force, long *gpio_num)
 					return -EPERM;
 			}
 
-			*gpio_num = gpio_alias_map[i].gpio_num;
+			*gpio_num = thisalias->gpio_alias_map.gpio_num;
 			pr_debug("%s: find GPIO %ld\n", __func__, *gpio_num);
 			return 0;
 		}
@@ -201,34 +200,40 @@ EXPORT_SYMBOL(gpio_map_name_to_num);
  *                         internal GPIO number
  * @gpio_num: The internal (i.e. MDM) GPIO pin number
  * @force: true if a check of function must be bypassed (useful to find anyway)
- * @*index: The next index n GPIO table after the matching number
+ * @**match: The matching entry in GPIO alias list
  * Context: After gpiolib_sysfs_init has setup the gpio device
  *
  * Returns NULL if the GPIO number is not mapped to a name
  * or if the access to the GPIO is prohibited (except if force = true)
  *
  */
-const char *gpio_map_num_to_name(long gpio_num, bool force, int *index)
+const char *gpio_map_num_to_name(long gpio_num, bool force, void **match)
 {
-	int	i;
+	struct gpio_alias_list	*thisalias = NULL;
 
 	gpio_sync_ri();
-	for (i = (*index > 0 ? *index : 0); i < gpio_alias_count; i++) {
+
+	if (*match == NULL)
+		thisalias = list_first_entry(&gpio_alias_list, struct gpio_alias_list, list);
+	else
+		thisalias = list_next_entry((struct gpio_alias_list *)*match, list);
+
+	list_for_each_entry_from(thisalias, &gpio_alias_list, list) {
 		struct gpio_desc	*desc;
-		if (gpio_alias_map[i].gpio_name && (gpio_num == gpio_alias_map[i].gpio_num)) {
-			*index = (i + 1);
-			desc = gpio_to_valid_desc(gpio_alias_map[i].gpio_num);
+		if (thisalias->gpio_alias_map.gpio_name && (gpio_num == thisalias->gpio_alias_map.gpio_num)) {
+			*match = thisalias;
+			desc = gpio_to_valid_desc(thisalias->gpio_alias_map.gpio_num);
 			if (!desc)
 				return NULL;
 			if (!force && !desc->owned_by_app_proc) {
 				if (!gpio_sync_ownership(desc))
 					return NULL;
 			}
-			return gpio_alias_map[i].gpio_name;
+			return thisalias->gpio_alias_map.gpio_name;
 		}
 	}
 
-	if (!(*index))
+	if (*match == NULL)
 		pr_debug("%s: Can not find GPIO %ld\n", __func__, gpio_num);
 	return NULL;
 }
@@ -236,7 +241,7 @@ EXPORT_SYMBOL(gpio_map_num_to_name);
 
 void gpio_create_alias_link(const struct gpio_desc *desc, struct device *dev)
 {
-	int		index = 0;
+	void		*match = NULL;
 	const char	*ioname;
 
 	if (desc) {
@@ -247,7 +252,7 @@ void gpio_create_alias_link(const struct gpio_desc *desc, struct device *dev)
 			pr_err("%s: Create link '%s' failed: %m\n", __func__, ioname);
 	}
 
-	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), false, &index))) {
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), false, &match))) {
 		if (-1 == sysfs_create_link(&gpio_aliases_exported_kset->kobj, &dev->kobj, ioname))
 			pr_err("%s: Create link '%s' failed: %m\n", __func__, ioname);
 	}
@@ -256,7 +261,7 @@ EXPORT_SYMBOL(gpio_create_alias_link);
 
 void gpio_remove_alias_link(const struct gpio_desc *desc)
 {
-	int		index = 0;
+	void		*match = NULL;
 	const char	*ioname;
 
 	if (desc) {
@@ -266,7 +271,7 @@ void gpio_remove_alias_link(const struct gpio_desc *desc)
 		sysfs_remove_link(&gpio_v2_kset->kobj, gpioname);
 	}
 
-	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &match))) {
 		sysfs_remove_link(&gpio_aliases_exported_kset->kobj, ioname);
 	}
 }
@@ -355,7 +360,7 @@ static ssize_t unexport_store(struct device *dev, struct device_attribute *attr,
 	int			status;
 	const char		*ioname;
 	char			ioname_buf[128];
-	int			index = 0;
+	void			*match = NULL;
 
 	status = kstrtol(buf, 0, &gpio);
 	if (status < 0)
@@ -381,7 +386,7 @@ static ssize_t unexport_store(struct device *dev, struct device_attribute *attr,
 
 	gpio_remove_alias_link(desc);
 
-	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &match))) {
 		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
 		sysfs_remove_link(&gpio_class->p->subsys.kobj, ioname_buf);
 	}
@@ -449,7 +454,7 @@ static ssize_t alias_unexport_store(struct device *dev, struct device_attribute 
 	int			status;
 	const char		*ioname;
 	char			ioname_buf[128];
-	int			index = 0;
+	void			*match = NULL;
 
 	status = gpio_map_name_to_num(buf, len, true, &gpio);
 	if (status < 0)
@@ -475,7 +480,7 @@ static ssize_t alias_unexport_store(struct device *dev, struct device_attribute 
 
 	gpio_remove_alias_link(desc);
 
-	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &index))) {
+	while ((ioname = gpio_map_num_to_name(desc_to_gpio(desc), true, &match))) {
 		snprintf(ioname_buf, sizeof(ioname_buf), "gpio%s", ioname);
 		sysfs_remove_link(&gpio_class->p->subsys.kobj, ioname_buf);
 	}
@@ -569,28 +574,30 @@ static DEVICE_ATTR_WO(alias_undefine);
  */
 static ssize_t alias_map_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	int	i;
 	int	status = 0;
+	struct gpio_alias_list	*thisalias = NULL;
 
 	gpio_sync_ri();
-	for (i = 0; i < gpio_alias_count; i++) {
-		if (gpio_alias_map[i].gpio_name) {
+
+	list_for_each_entry(thisalias, &gpio_alias_list, list) {
+		if (thisalias->gpio_alias_map.gpio_name) {
 			struct gpio_desc *desc;
-			desc = gpio_to_desc(gpio_alias_map[i].gpio_num);
+			desc = gpio_to_desc(thisalias->gpio_alias_map.gpio_num);
 			if (desc && desc->gdev && desc->gdev->chip)
 				status += snprintf(buf + status, PAGE_SIZE - status, "%4d,%-4d %c \"%s\"\n",
 							desc->gdev->chip->base,
-							gpio_alias_map[i].gpio_num - desc->gdev->chip->base,
-							desc->owned_by_app_proc ? 'A' : 
+							thisalias->gpio_alias_map.gpio_num - desc->gdev->chip->base,
+							desc->owned_by_app_proc ? 'A' :
 								(gpio_sync_ownership(desc) ? 'A' : 'M'),
-							gpio_alias_map[i].gpio_name);
+							thisalias->gpio_alias_map.gpio_name);
 			else
 				status += snprintf(buf + status, PAGE_SIZE - status, "%9d %c \"%s\"\n",
-							gpio_alias_map[i].gpio_num,
+							thisalias->gpio_alias_map.gpio_num,
 							'A',
-							gpio_alias_map[i].gpio_name);
+							thisalias->gpio_alias_map.gpio_name);
 		}
 	}
+
 	return status;
 }
 static DEVICE_ATTR_RO(alias_map);
@@ -723,6 +730,7 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 	int			gpio;
 	struct property		*pp;
 	int			dummy;
+	struct gpio_alias_list	*thisalias = NULL;
 	struct gpiochip_list	*chip;
 	struct list_head	*list;
 	unsigned long		flags;
@@ -834,38 +842,55 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 			}
 		}
 		if (gpio >= 0) {
-			if (ngpios == MAX_NB_GPIOS) {
-				dev_err(&pdev->dev, "Too many aliases\n");
-				break;
-			}
+			char			*ioname = NULL;
+			struct gpio_alias_list	*newalias = NULL;
+			char			*alias = NULL;
+
+
 			desc = gpio_to_desc(gpio);
 			/* skip "alias-" from DT name */
-			gpio_alias_map[ngpios].gpio_name = pp->name + sizeof(GPIO_ALIAS_PROPERTY) - 1;
-			gpio_alias_map[ngpios].gpio_num = gpio;
+			alias =  pp->name + sizeof(GPIO_ALIAS_PROPERTY) - 1;
+			ioname = kstrdup(alias, GFP_KERNEL);
+			if (!ioname) {
+				dev_err(&pdev->dev, "No memory to allocate GPIO alias name\n");
+				return -ENOMEM;
+			}
+
+			newalias = kmalloc(sizeof(struct gpio_alias_list), GFP_KERNEL);
+			if (!newalias) {
+				dev_err(&pdev->dev, "No memory to allocate new GPIO alias\n");
+				kfree(ioname);
+				return -ENOMEM;
+			}
+			INIT_LIST_HEAD(&newalias->list);
+
+			newalias->gpio_alias_map.gpio_name = ioname;
+			newalias->gpio_alias_map.gpio_num = gpio;
 			if (desc && test_bit(FLAG_RING_INDIC, &desc->flags) && (gpio_ri == -1)) {
-				gpio_ri = gpio_alias_map[ngpios].gpio_num;
+				gpio_ri = newalias->gpio_alias_map.gpio_num;
 				gpio_sync_ri();
 			}
 			if (-1 == gpio_sync_ownership(desc)) {
 				dev_info(&pdev->dev, "Ownership not updated for \"%s\".\n", pp->name);
 			}
-			gpio_create_alias_name_file(&gpio_alias_map[ngpios]);
+			gpio_create_alias_name_file(&newalias->gpio_alias_map);
 			dev_dbg(&pdev->dev, "%d PIN %d FUNC %d NAME \"%s\"\n",
-				ngpios, gpio_alias_map[ngpios].gpio_num,
+				ngpios, newalias->gpio_alias_map.gpio_num,
 				desc ? desc->owned_by_app_proc : 1,
-				gpio_alias_map[ngpios].gpio_name);
+				newalias->gpio_alias_map.gpio_name);
+			list_add_tail(&newalias->list, &gpio_alias_list);
 			ngpios++;
 		}
 		else {
 			dev_err(&pdev->dev, "Skipping \"%s\". Unable to decode.\n", pp->name);
 		}
 	}
-	gpio_alias_dt_count = gpio_alias_count = ngpios;
+	gpio_alias_dt_count = ngpios;
 
-	for (ngpios = 0; ngpios < gpio_alias_count; ngpios++) {
+	list_for_each_entry(thisalias, &gpio_alias_list, list) {
 		struct gpio_desc	*desc;
 
-		desc = gpio_to_desc(gpio_alias_map[ngpios].gpio_num);
+		desc = gpio_to_desc(thisalias->gpio_alias_map.gpio_num);
 		if (desc && desc->gdev && desc->gdev->chip) {
 			if (desc->gdev->chip->bitmask_valid && desc->gdev->chip->max_bit != -1) {
 				int mask_array_size = (desc->gdev->chip->ngpio +
@@ -903,19 +928,19 @@ static int sierra_gpio_probe(struct platform_device *pdev)
  */
 int gpio_alias_lookup(const char *alias, struct gpio_desc **gpio)
 {
-	int	i;
+	struct gpio_alias_list	*thisalias = NULL;
 
 	gpio_sync_ri();
-	for (i = 0; i < gpio_alias_count; i++) {
-		if (gpio_alias_map[i].gpio_name &&
-			(strcmp(alias, gpio_alias_map[i].gpio_name) == 0)) {
-			*gpio = gpio_to_desc(gpio_alias_map[i].gpio_num);
+
+	list_for_each_entry(thisalias, &gpio_alias_list, list) {
+		if (thisalias->gpio_alias_map.gpio_name &&
+			(strcmp(alias, thisalias->gpio_alias_map.gpio_name) == 0)) {
+			*gpio = gpio_to_desc(thisalias->gpio_alias_map.gpio_num);
 			gpio_sync_ownership(*gpio);
-			pr_debug("%s: alias %s, find GPIO %d\n", __func__, alias, gpio_alias_map[i].gpio_num);
+			pr_debug("%s: alias %s, find GPIO %d\n", __func__, alias, thisalias->gpio_alias_map.gpio_num);
 			return 0;
 		}
 	}
-
 	pr_debug("%s: Can not find GPIO %s\n", __func__, alias);
 	return -ENOENT;
 }
@@ -931,9 +956,10 @@ static int _gpio_alias_define(const char *alias, struct gpio_desc *gpio, bool al
 	long			gpio_num = desc_to_gpio(gpio);
 	int			status;
 	char			*ioname = NULL;
-	int			i;
-	struct gpio_alias_map	*ext = NULL;
 	unsigned long		flags;
+	struct gpio_alias_list	*thisalias = NULL;
+	struct gpio_alias_list	*newalias = NULL;
+	struct list_head	*list;
 
 	/* reject invalid GPIOs */
 	if (!gpio_to_desc(gpio_num)) {
@@ -948,53 +974,65 @@ static int _gpio_alias_define(const char *alias, struct gpio_desc *gpio, bool al
 		status = -ENOMEM;
 		goto done;
 	}
+
+	newalias = kmalloc(sizeof(struct gpio_alias_list), GFP_KERNEL);
+	if (!newalias) {
+		pr_err("%s: No space to allocate new GPIO alias\n", __func__);
+		status = -ENOMEM;
+		goto done;
+	}
+	INIT_LIST_HEAD(&newalias->list);
+
 	spin_lock_irqsave(&alias_lock, flags);
-	for (i = 0; i <gpio_alias_count; i++) {
-		if (gpio_alias_map[i].gpio_name &&
-			(strcmp(alias, gpio_alias_map[i].gpio_name) == 0)) {
+
+	list_for_each(list, &gpio_alias_list) {
+		thisalias = list_entry(list, struct gpio_alias_list, list);
+		if (thisalias->gpio_alias_map.gpio_name &&
+			(strcmp(alias, thisalias->gpio_alias_map.gpio_name) == 0)) {
 			if (!allow_overwrite) {
 				pr_err("%s: GPIO aliases already exists\n", __func__);
+				thisalias = NULL;
 				status = -EEXIST;
 				goto done_restore;
 			}
-			ext = &gpio_alias_map[i];
-			kfree(ext->gpio_name);
+			kfree(thisalias->gpio_alias_map.gpio_name);
 			break;
 		}
-		if (!ext && !gpio_alias_map[i].gpio_name)
-			ext = &gpio_alias_map[i];
+		thisalias = NULL;
 	}
 
-	if (!ext && gpio_alias_count == MAX_NB_GPIOS) {
-		pr_err("%s: too many GPIO aliases\n", __func__);
-		status = -ENOMEM;
-		goto done_restore;
+	if (!thisalias) {
+		list_add_tail(&newalias->list, &gpio_alias_list);
+		thisalias = newalias;
+		newalias = NULL;
 	}
-	if (!ext)
-		ext = &gpio_alias_map[gpio_alias_count];
 
-	ext->gpio_name = ioname;
-	ext->gpio_num = gpio_num;
+	thisalias->gpio_alias_map.gpio_name = ioname;
+	thisalias->gpio_alias_map.gpio_num = gpio_num;
 	if ( -1 == gpio_sync_ownership(gpio))
 	{
 		pr_warn("%s: Unable to set ownership for gpio %ld\n", __func__, gpio_num);
 		status = -EINVAL;
-		goto done;
+		goto done_restore;
 	}
 	spin_unlock_irqrestore(&alias_lock, flags);
-	status = gpio_create_alias_name_file(ext);
+	status = gpio_create_alias_name_file(&thisalias->gpio_alias_map);
 
 done:
 	if (status) {
+		if (thisalias) {
+			list_del(&thisalias->list);
+			kfree(thisalias);
+		}
+
 		if (ioname)
 			kfree(ioname);
-		if (ext)
-			memset(ext, 0, sizeof(struct gpio_alias_map));
 		pr_debug("%s: status %d\n", __func__, status);
 	}
-	else if (ext == &gpio_alias_map[gpio_alias_count])
-		/* New GPIO aliases is registered */
-		gpio_alias_count++;
+
+	if (newalias)
+		/* Allocated but unconsumed. */
+		kfree(newalias);
 	return status;
 
 done_restore:
@@ -1014,25 +1052,30 @@ EXPORT_SYMBOL(gpio_alias_define);
 static int _gpio_alias_undefine(const char *alias)
 {
 	int			status;
-	int			i;
+	int			pos = 0;
 	unsigned long		flags;
 	struct device_attribute	thisattr;
 	char			*thisname;
+	struct gpio_alias_list	*thisalias = NULL;
 
 	status = -ENOENT;
 	spin_lock_irqsave(&alias_lock, flags);
-	for (i = 0; i <gpio_alias_count; i++) {
-		if (strcmp(alias, gpio_alias_map[i].gpio_name) == 0) {
+
+	list_for_each_entry(thisalias, &gpio_alias_list, list) {
+		if (thisalias->gpio_alias_map.gpio_name &&
+			(strcmp(alias, thisalias->gpio_alias_map.gpio_name) == 0)) {
 			status = 0;
 			break;
 		}
+		pos++;
 	}
+
 	if (status)
 		goto done_restore;
 
-	if (i < gpio_alias_dt_count) {
+	if (pos < gpio_alias_dt_count) {
 		pr_err("%s: Cannot destroy GPIO alias %s created by device tree\n",
-			 __func__, gpio_alias_map[i].gpio_name);
+			 __func__, thisalias->gpio_alias_map.gpio_name);
 		status = -EPERM;
 		goto done_restore;
 	}
@@ -1041,19 +1084,18 @@ static int _gpio_alias_undefine(const char *alias)
 	 * request and export were done by on behalf of userspace, so
 	 * they may be undone on its behalf too.
 	 */
-	if (test_bit(FLAG_SYSFS, &gpio_to_desc(gpio_alias_map[i].gpio_num)->flags)) {
+	if (test_bit(FLAG_SYSFS, &gpio_to_desc(thisalias->gpio_alias_map.gpio_num)->flags)) {
 		pr_err("%s: Cannot destroy GPIO alias currently exported\n", __func__);
 		status = -EBUSY;
 		goto done_restore;
 	}
 
-	thisname = gpio_alias_map[i].gpio_name;
-	thisattr = gpio_alias_map[i].attr;
-	if (i < (gpio_alias_count - 1))
-		memmove(&gpio_alias_map[i], &gpio_alias_map[i + 1],
-			sizeof(gpio_alias_map[0]) * (gpio_alias_count - i - 1));
-	gpio_alias_count--;
+	thisname = thisalias->gpio_alias_map.gpio_name;
+	thisattr = thisalias->gpio_alias_map.attr;
+
+	list_del(&thisalias->list);
 	spin_unlock_irqrestore(&alias_lock, flags);
+	kfree(thisalias);
 	sysfs_remove_file(&gpio_aliases_kset->kobj, &thisattr.attr);
 	kfree(thisname);
 
@@ -1086,16 +1128,17 @@ int gpio_find_aliases(struct gpio_desc *desc, const char **aliases, size_t *num_
 {
 	int	gpio = desc_to_gpio(desc);
 	int	naliases = 0;
+	struct gpio_alias_list	*thisalias = NULL;
 
 	if (gpio_to_desc(gpio)) {
-		int	i;
 
-		for (i = 0; i < gpio_alias_count; i++) {
-			if (gpio_alias_map[i].gpio_num == gpio) {
+		list_for_each_entry(thisalias, &gpio_alias_list,list) {
+			if (thisalias->gpio_alias_map.gpio_num == gpio) {
 				if (naliases < *num_aliases)
-					aliases[naliases++] = gpio_alias_map[i].gpio_name;
+					aliases[naliases++] = thisalias->gpio_alias_map.gpio_name;
 				else
 					return -ENOMEM;
+
 			}
 		}
 		*num_aliases = naliases;
@@ -1107,8 +1150,19 @@ EXPORT_SYMBOL(gpio_find_aliases);
 
 static int sierra_gpio_remove(struct platform_device *pdev)
 {
+	struct gpio_alias_list	*thisalias = NULL;
+	struct list_head	*list;
+
 	pr_info("sierra_gpio_remove");
-	gpio_alias_dt_count = gpio_alias_count = 0;
+	gpio_alias_dt_count = 0;
+
+	list_for_each(list, &gpio_alias_list) {
+		thisalias = list_entry(list, struct gpio_alias_list, list);
+		list_del(&thisalias->list);
+		kfree(thisalias->gpio_alias_map.gpio_name);
+		kfree(thisalias);
+	}
+
 	return 0;
 }
 

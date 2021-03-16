@@ -17,7 +17,7 @@
 #define __LINUX_SIERRA_GPIO_H
 
 extern int gpio_map_name_to_num(const char *buf, int len, bool force, long *gpio_num);
-extern const char *gpio_map_num_to_name(long gpio_num, bool force, int *index);
+extern const char *gpio_map_num_to_name(long gpio_num, bool force, void **match);
 extern void gpio_create_alias_link(const struct gpio_desc *desc, struct device *dev);
 extern void gpio_remove_alias_link(const struct gpio_desc *desc);
 
@@ -55,7 +55,7 @@ static inline int gpio_map_name_to_num(const char *buf, int len, bool force, lon
 	return -ENOENT;
 }
 
-static inline const char *gpio_map_num_to_name(long gpio_num, bool force, int *index)
+static inline const char *gpio_map_num_to_name(long gpio_num, bool force, void **match)
 {
 	return NULL;
 }
