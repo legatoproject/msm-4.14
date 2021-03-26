@@ -265,8 +265,11 @@ static struct sg_table *dup_sg_table(struct sg_table *table)
 	new_sg = new_table->sgl;
 	for_each_sg(table->sgl, sg, table->nents, i) {
 		memcpy(new_sg, sg, sizeof(*sg));
+#ifndef CONFIG_SIERRA
+		/* Disable code that reports zero-size ION allocation */
 		sg_dma_address(new_sg) = 0;
 		sg_dma_len(new_sg) = 0;
+#endif
 		new_sg = sg_next(new_sg);
 	}
 
