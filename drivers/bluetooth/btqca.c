@@ -325,7 +325,7 @@ static int hst_tlv_send_segment_sync(struct hci_dev *hdev, int idx,
 
 	if (skb->data[0] != 0x00 ||
 		skb->data[1] != EDL_PATCH_TLV_REQ_CMD) {
-		BT_ERR("%s: Get error reply");
+		BT_ERR("%s: Get error reply",  hdev->name);
 		err = -EIO;
 	}
 
@@ -659,7 +659,7 @@ int qca_uart_setup_rome(struct hci_dev *hdev, uint8_t baudrate,
 
 	if (!(qca_ver == ROME_VER_3_2 || qca_ver == HST_VER_2_0 ||
 			qca_ver == GNA_VER_2_0)) {
-		BT_ERR("%s: Not supported chip version 0x%x",
+		BT_ERR("%s: Not supported chip version 0x%llx",
 						hdev->name, qca_ver);
 		return -EUNATCH;
 	}
