@@ -827,7 +827,7 @@ static int sierra_gpio_probe(struct platform_device *pdev)
 		}
 		else {
 			gpio = of_get_named_gpio_flags(np, pp->name, 0, (enum of_gpio_flags *)&dummy);
-			if (-EPROBE_DEFER == gpio) {
+			if ((-EPROBE_DEFER == gpio) && (-EPROBE_DEFER == driver_deferred_probe_check_state(&pdev->dev))) {
 				dev_info(&pdev->dev, "Deferring driver init due to \"%s\"\n", pp->name);
 				deferred_ppname = pp->name;
 				return -EPROBE_DEFER;
