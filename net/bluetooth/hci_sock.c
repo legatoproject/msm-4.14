@@ -193,7 +193,7 @@ void hci_send_to_sock(struct hci_dev *hdev, struct sk_buff *skb)
 	struct sock *sk;
 	struct sk_buff *skb_copy = NULL;
 
-	BT_DBG("hdev %p len %d", hdev, skb->len);
+	BT_DBG("hdev %pK len %d", hdev, skb->len);
 
 	read_lock(&hci_sk_list.lock);
 
@@ -298,7 +298,7 @@ void hci_send_to_monitor(struct hci_dev *hdev, struct sk_buff *skb)
 	if (!atomic_read(&monitor_promisc))
 		return;
 
-	BT_DBG("hdev %p len %d", hdev, skb->len);
+	BT_DBG("hdev %pK len %d", hdev, skb->len);
 
 	switch (hci_skb_pkt_type(skb)) {
 	case HCI_COMMAND_PKT:
@@ -821,7 +821,7 @@ static int hci_sock_release(struct socket *sock)
 	struct hci_dev *hdev;
 	struct sk_buff *skb;
 
-	BT_DBG("sock %p sk %p", sock, sk);
+	BT_DBG("sock %pK sk %pK", sock, sk);
 
 	if (!sk)
 		return 0;
@@ -1061,7 +1061,7 @@ static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,
 	struct sk_buff *skb;
 	int len, err = 0;
 
-	BT_DBG("sock %p sk %p", sock, sk);
+	BT_DBG("sock %pK sk %pK", sock, sk);
 
 	if (!addr)
 		return -EINVAL;
@@ -1344,7 +1344,7 @@ static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,
 	struct hci_dev *hdev;
 	int err = 0;
 
-	BT_DBG("sock %p sk %p", sock, sk);
+	BT_DBG("sock %pK sk %pK", sock, sk);
 
 	if (peer)
 		return -EOPNOTSUPP;
@@ -1413,7 +1413,7 @@ static int hci_sock_recvmsg(struct socket *sock, struct msghdr *msg,
 	int copied, err;
 	unsigned int skblen;
 
-	BT_DBG("sock %p, sk %p", sock, sk);
+	BT_DBG("sock %pK, sk %pK", sock, sk);
 
 	if (flags & MSG_OOB)
 		return -EOPNOTSUPP;
@@ -1677,7 +1677,7 @@ static int hci_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 	struct sk_buff *skb;
 	int err;
 
-	BT_DBG("sock %p sk %p", sock, sk);
+	BT_DBG("sock %pK sk %pK", sock, sk);
 
 	if (msg->msg_flags & MSG_OOB)
 		return -EOPNOTSUPP;
@@ -1815,7 +1815,7 @@ static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
 	struct sock *sk = sock->sk;
 	int err = 0, opt = 0;
 
-	BT_DBG("sk %p, opt %d", sk, optname);
+	BT_DBG("sk %pK, opt %d", sk, optname);
 
 	if (level != SOL_HCI)
 		return -ENOPROTOOPT;
@@ -1901,7 +1901,7 @@ static int hci_sock_getsockopt(struct socket *sock, int level, int optname,
 	struct sock *sk = sock->sk;
 	int len, opt, err = 0;
 
-	BT_DBG("sk %p, opt %d", sk, optname);
+	BT_DBG("sk %pK, opt %d", sk, optname);
 
 	if (level != SOL_HCI)
 		return -ENOPROTOOPT;
@@ -1994,7 +1994,7 @@ static int hci_sock_create(struct net *net, struct socket *sock, int protocol,
 {
 	struct sock *sk;
 
-	BT_DBG("sock %p", sock);
+	BT_DBG("sock %pK", sock);
 
 	if (sock->type != SOCK_RAW)
 		return -ESOCKTNOSUPPORT;

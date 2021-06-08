@@ -232,7 +232,7 @@ int hci_uart_init_ready(struct hci_uart *hu)
 /* Initialize device */
 static int hci_uart_open(struct hci_dev *hdev)
 {
-	BT_DBG("%s %p", hdev->name, hdev);
+	BT_DBG("%s %pK", hdev->name, hdev);
 
 	/* Nothing to do for UART driver */
 	return 0;
@@ -244,7 +244,7 @@ static int hci_uart_flush(struct hci_dev *hdev)
 	struct hci_uart *hu  = hci_get_drvdata(hdev);
 	struct tty_struct *tty = hu->tty;
 
-	BT_DBG("hdev %p tty %p", hdev, tty);
+	BT_DBG("hdev %pK tty %pK", hdev, tty);
 
 	if (hu->tx_skb) {
 		kfree_skb(hu->tx_skb); hu->tx_skb = NULL;
@@ -267,7 +267,7 @@ static int hci_uart_flush(struct hci_dev *hdev)
 /* Close device */
 static int hci_uart_close(struct hci_dev *hdev)
 {
-	BT_DBG("hdev %p", hdev);
+	BT_DBG("hdev %pK", hdev);
 
 	hci_uart_flush(hdev);
 	hdev->flush = NULL;
@@ -481,7 +481,7 @@ static int hci_uart_tty_open(struct tty_struct *tty)
 {
 	struct hci_uart *hu;
 
-	BT_DBG("tty %p", tty);
+	BT_DBG("tty %pK", tty);
 
 	/* Error if the tty has no write op instead of leaving an exploitable
 	 * hole
@@ -524,7 +524,7 @@ static void hci_uart_tty_close(struct tty_struct *tty)
 	struct hci_uart *hu = tty->disc_data;
 	struct hci_dev *hdev;
 
-	BT_DBG("tty %p", tty);
+	BT_DBG("tty %pK", tty);
 
 	/* Detach from the tty */
 	tty->disc_data = NULL;
