@@ -196,6 +196,14 @@ struct msm_port {
 
 #define UART_TO_MSM(uart_port)	container_of(uart_port, struct msm_port, uart)
 
+#ifdef CONFIG_SIERRA_FX30
+static void msm_rs485_txon(struct uart_port *up);
+static void msm_rs485_txoff(struct uart_port *up);
+#else
+static inline void msm_rs485_txon(struct uart_port *up) { return; }
+static inline void msm_rs485_txoff(struct uart_port *up) { return; }
+#endif
+
 static
 void msm_write(struct uart_port *port, unsigned int val, unsigned int off)
 {
@@ -411,6 +419,7 @@ static void msm_stop_tx(struct uart_port *port)
 
 	msm_port->imr &= ~UART_IMR_TXLEV;
 	msm_write(port, msm_port->imr, UART_IMR);
+	msm_rs485_txoff(port);
 }
 
 static void msm_start_tx(struct uart_port *port)
@@ -422,6 +431,7 @@ static void msm_start_tx(struct uart_port *port)
 	if (dma->count)
 		return;
 
+	msm_rs485_txon(port);
 	msm_port->imr |= UART_IMR_TXLEV;
 	msm_write(port, msm_port->imr, UART_IMR);
 }
@@ -1681,7 +1691,9 @@ static void msm_console_write(struct console *co, const char *s,
 	port = msm_get_port_from_line(co->index);
 	msm_port = UART_TO_MSM(port);
 
+	msm_rs485_txon(port);
 	__msm_console_write(port, s, count, msm_port->is_uartdm);
+	msm_rs485_txoff(port);
 }
 #endif
 
@@ -1937,3 +1949,7 @@ module_exit(msm_serial_exit);
 MODULE_AUTHOR("Robert Love <rlove@google.com>");
 MODULE_DESCRIPTION("Driver for msm7x serial device");
 MODULE_LICENSE("GPL");
+
+#ifdef CONFIG_SIERRA_FX30
+#include "msm_serial_fx30.c"
+#endif

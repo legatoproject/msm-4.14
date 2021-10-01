@@ -42,6 +42,17 @@
 	};
 };
 
+&soc {
+	blsp_uart2_ls: serial@78b0000 {
+		sierra,rs485-txonb-gpio = <&tlmm_pinmux 47 1>;
+		sierra,rs485-rxon-gpio = <&tlmm_pinmux 48 0>;
+		sierra,forceoff-rs232b-gpio = <&tca6424 16 0>;
+		sierra,rs485-termb-gpio = <&tca6424 20 0>;
+		sierra,rs485-udelay = <20 200>;	/* measured on DV2 in usec */
+	};
+};
+
+
 &sierra_gpio {
 
 	/* Note for GPIO36 and GPIO38:

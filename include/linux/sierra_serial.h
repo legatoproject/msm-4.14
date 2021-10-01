@@ -21,9 +21,15 @@
 #ifdef CONFIG_SIERRA
 extern int uart_create_sysfs_config(struct device *dev);
 extern bool uart_is_function_console(struct device *dev);
+#ifdef CONFIG_SIERRA_FX30
+extern bool uart_is_function_rs485(struct device *dev);
+#else
+#define uart_is_function_rs485(x) (false)
+#endif
 #else
 #define uart_create_sysfs_config(x) (0)
 #define uart_is_function_console(x) (true)
+#define uart_is_function_rs485(x) (false)
 #endif
 
 #endif /* CONFIG_SIERRA_SERIAL_H */

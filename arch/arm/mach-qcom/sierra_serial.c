@@ -16,47 +16,6 @@
 #include <linux/of.h>
 #include <linux/sierra_serial.h>
 
-/*
-RS485 loopback mode is not currently supported.
-For RS485_LOOPBACK mode, I still need to understand the "echo"/"special char"
-related behaviour in "tty_bufhead.work" in kernel worker thread.
-More investigation is required on TTY configuration regarding echo/special chars
-xmit on the receiving path.
-*/
-/* #define RS485_ENABLE_LOOPBACK_SUPPORT */
-#undef RS485_ENABLE_LOOPBACK_SUPPORT
-
-
-#ifdef CONFIG_SIERRA_MSM_RS485
-#include <linux/gpio/driver.h>
-#include "mach/swimcu.h"
-
-enum serial_rs_mode {
-	SERIAL_RS232, /* Default serial communication mode*/
-	SERIAL_RS485_NO_LOOPBACK, /* RS485 support*/
-	SERIAL_RS485_LOOPBACK, /* RS485 support*/
-};
-
-enum rs485_term_mode {
-  RS485_TERM_DISABLE = 0, /* Disable termination resistor - Default */
-  RS485_TERM_ENABLE,      /* Enable termination resistor */
-  RS485_TERM_DYNAMIC,     /* Dynamic termination resistor - Currently not supported */
-  RS485_TERM_NUM          /* ALWAYS LAST - Number of items in this enumeration */
-};
-
-/* DM, FIXME: Some of this need to be reworked to fit into new GPIO framework. */
-#define MSM_GPIO_RS485_OUT_EN_N       (47)
-#define MSM_GPIO_RS485_IN_EN          (48)
-#define MSM_GPIOEXP_FORCEOFF_RS232_N  FX30SEXP_GPIO_TO_SYS(16)
-#define MSM_GPIOEXP_RS485_TERM_N      FX30SEXP_GPIO_TO_SYS(20)
-
-static unsigned int gpioexp_forceoff_rs232  = ARCH_NR_GPIOS;
-static unsigned int gpioexp_rs483_term      = ARCH_NR_GPIOS;
-static unsigned int gpio_rs485_out_en       = ARCH_NR_GPIOS;
-static unsigned int gpio_rs485_in_en        = ARCH_NR_GPIOS;
-
-#endif
-
 typedef struct uart_function_triplet_ {
 	enum bs_uart_line_e line;
 	enum bs_uart_type_e speed;
@@ -200,3 +159,10 @@ bool uart_is_function_console(struct device *dev)
 {
 	return BS_UART_FUNC_CONSOLE == assign_function(dev);
 }
+
+#ifdef CONFIG_SIERRA_FX30
+bool uart_is_function_rs485(struct device *dev)
+{
+	return BS_UART_FUNC_RS485 == assign_function(dev);
+}
+#endif
