@@ -1624,6 +1624,7 @@ static int swimcu_pm_wusrc_config(
 				}
 				statep->recovery_irqs[wi] = irq & 0xFF;
 
+#ifdef CONFIG_SIERRA_FX30
 				/* Force enable the pull up resistor on the GPIO.
 				 *
 				 * Because of the hardware design of the FX30, the pull up
@@ -1642,6 +1643,7 @@ static int swimcu_pm_wusrc_config(
 						__func__, gpio, err_code);
 					return err_code;
 				}
+#endif
 
 				/* set specific IRQ type configured by user */
 				err_code = swimcu_gpio_set(swimcup, SWIMCU_GPIO_SET_EDGE, gpio, wrsrc_irq);
@@ -2218,6 +2220,7 @@ static ssize_t pm_gpio_edge_attr_store(struct kobject *kobj,
 
 	swimcup = container_of(kobj->parent, struct swimcu, pm_boot_source_kobj);
 
+#ifdef CONFIG_SIERRA_FX30
 	/* Force enable the pull up resistor on the GPIO.
 	 *
 	 * Because of the hardware design of the FX30, the pull up
@@ -2236,6 +2239,7 @@ static ssize_t pm_gpio_edge_attr_store(struct kobject *kobj,
 		pr_err("%s: failed to set pull up resistor for gpio %d (err=%d)\n", __func__, gpio, ret);
 		return ret;
 	}
+#endif
 
 	ret = swimcu_gpio_set(swimcup,
 		SWIMCU_GPIO_SET_EDGE, gpio, swimcu_irq_type_name_map[ti].type);
