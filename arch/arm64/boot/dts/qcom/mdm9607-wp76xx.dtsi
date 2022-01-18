@@ -14,6 +14,7 @@
 #include "mdm9607-swi.dtsi"
 #include "mdm9607-pinctrl.dtsi"
 #include "mdm9607-swimcu.dtsi"
+#include <dt-bindings/pinctrl/qcom,pmic-mpp.h>
 
 / {
 	usb_detect: usb_detect {
@@ -388,6 +389,26 @@
                         input-enable;
                         bias-pull-down;
                         power-source = <1>;
+        };
+};
+
+/* MPP pin 2 and 4 config for ADC input */
+&pm8019_mpps {
+        pinctrl-names = "default";
+        pinctrl-0 = <&adc0_default &adc1_default>;
+
+        adc0_default: adc0_default { /* MPP 2 for adc0 */
+                pins = "mpp2";
+                function = "analog";
+                input-enable;
+                qcom,amux-route = <PMIC_MPP_AMUX_ROUTE_CH6>;
+        };
+
+        adc1_default: adc1_default { /* MPP 4 for adc1 */
+                pins = "mpp4";
+                function = "analog";
+                input-enable;
+                qcom,amux-route = <PMIC_MPP_AMUX_ROUTE_CH8>;
         };
 };
 
