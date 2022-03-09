@@ -21,8 +21,13 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 
+#ifdef CONFIG_SIERRA
+#define FILE_PCM_PLAYBACK	"/dev/snd/pcmC0D13p"
+#define FILE_PCM_CAPTURE	"/dev/snd/pcmC0D13c"
+#else
 #define FILE_PCM_PLAYBACK	"/dev/snd/pcmC0D5p"
 #define FILE_PCM_CAPTURE	"/dev/snd/pcmC0D6c"
+#endif
 #define FILE_CONTROL		"/dev/snd/controlC0"
 
 #define UAC1_IN_EP_MAX_PACKET_SIZE	32
