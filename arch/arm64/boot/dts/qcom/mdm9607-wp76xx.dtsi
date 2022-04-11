@@ -200,8 +200,26 @@
 	};
 
 	sdcard_ext_vreg: sdcard_ext_vreg {
-	/* undefine (by overriding) the use of pm-gpio4 *
-	 * we don't use pm-gpio4 for sdcard_ext_vreg.   *
+	/* undefine (by overriding) the use of pm-gpio4
+	 * we use pm-gpio4 for swimcu insted of sdcard_ext_vreg.
+	 */
+		gpio;
+		pinctrl-names;
+		pinctrl-0;
+	};
+
+	rome_vreg: rome_vreg {
+	/* undefine (by overriding) the use of pm-gpio3
+	 * we don't use pm-gpio3 for rome_vreg.
+	 */
+		gpio;
+		pinctrl-names;
+		pinctrl-0;
+	};
+
+	emac_lan_vreg: emac_lan_vreg {
+	/* undefine (by overriding) the use of pm-mpp4
+	 * we use pm-mpp4 for adc1 instead of emac_lan_vreg.
 	 */
 		gpio;
 		pinctrl-names;
