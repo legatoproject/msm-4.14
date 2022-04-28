@@ -840,8 +840,8 @@ static int msm_smd_pkt_probe(struct platform_device *pdev)
 	for_each_child_of_node(dev->of_node, cn)
 		smd_pkt_create_device(dev, cn);
 
-		SMD_PKT_INFO("smd Packet Port Driver Initialized\n");
-		return 0;
+	SMD_PKT_INFO("smd Packet Port Driver Initialized\n");
+	return 0;
 
 error_deinit:
 	smd_pkt_deinit();
